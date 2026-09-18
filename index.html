@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>受付状況</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #f4f6f8;
+    color: #222;
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        "Noto Sans JP",
+        "Yu Gothic UI",
+        "Meiryo",
+        sans-serif;
+}
+
+header {
+    background: #ffffff;
+    border-bottom: 1px solid #ddd;
+    padding: 20px 16px;
+    text-align: center;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 26px;
+}
+
+#eventName {
+    margin-top: 6px;
+    font-size: 15px;
+    color: #666;
+}
+
+.status-area {
+    max-width: 900px;
+    margin: 16px auto;
+    padding: 0 12px;
+}
+
+.update-area {
+    background: white;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+#lastUpdate {
+    font-size: 14px;
+    color: #666;
+}
+
+button {
+    border: 0;
+    border-radius: 7px;
+    padding: 9px 18px;
+    font-size: 15px;
+    cursor: pointer;
+    background: #222;
+    color: white;
+}
+
+.room {
+    background: white;
+    border-radius: 12px;
+    margin-bottom: 18px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+.room-title {
+    font-size: 22px;
+    font-weight: bold;
+    padding: 15px 18px;
+    background: #eceff1;
+}
+
+.session {
+    padding: 15px 18px;
+    border-top: 1px solid #eee;
+}
+
+.session-title {
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.speaker {
+    display: flex;
+    align-items: center;
+    padding: 11px 0;
+    border-top: 1px solid #f0f0f0;
+}
+
+.speaker:first-of-type {
+    border-top: none;
+}
+
+.number {
+    width: 75px;
+    flex-shrink: 0;
+    font-weight: bold;
+}
+
+.name {
+    flex: 1;
+    font-size: 17px;
+}
+
+.received {
+    font-weight: bold;
+    color: #087f23;
+    white-space: nowrap;
+}
+
+.received::before {
+    content: "●";
+    margin-right: 5px;
+}
+
+.loading,
+.empty,
+.error {
+    background: white;
+    padding: 30px;
+    text-align: center;
+    border-radius: 10px;
+}
+
+.error {
+    color: #b00020;
+}
+
+footer {
+    text-align: center;
+    padding: 20px;
+    color: #888;
+    font-size: 12px;
+}
+
+@media (max-width: 600px) {
+
+    header h1 {
+        font-size: 22px;
+    }
+
+    .room-title {
+        font-size: 20px;
+    }
+
+    .session-title {
+        font-size: 17px;
+    }
+
+    .number {
+        width: 60px;
+    }
+
+    .name {
+        font-size: 16px;
+    }
+
+    .received {
+        font-size: 14px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <h1>受付状況</h1>
+    <div id="eventName"></div>
+</header>
+
+<main class="status-area">
+
+    <div class="update-area">
+        <div id="lastUpdate">読み込み中...</div>
+        <button onclick="loadReception()">更新</button>
+    </div>
+
+    <div id="content">
+        <div class="loading">
+            受付状況を読み込んでいます...
+        </div>
+    </div>
+
+</main>
+
+<footer>
+    Reception Status System
+</footer>
+
+<script>
+
+/* ==========================================
+   Supabase設定
+========================================== */
+
+const SUPABASE_URL =
+    "https://bwxlexxgiwknezvwgogi.supabase.co";
+
+const SUPABASE_KEY =
+    "sb_publishable_jve0-G7Y7-00jsq-jn-w1Q_XLRl72_V";
+
+
+/* ==========================================
+   URLからイベントID取得
+
+   例:
+   ?event=Test_reception
+========================================== */
+
+const params =
+    new URLSearchParams(window.location.search);
+
+const EVENT_ID =
+    params.get("event") || "Test_reception";
+
+
+/* ==========================================
+   HTMLエスケープ
+========================================== */
+
+function escapeHtml(value) {
+
+    if (value === null || value === undefined)
+        return "";
+
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+
+/* ==========================================
+   演題番号の自然順ソート
+========================================== */
+
+function naturalCompare(a, b) {
+
+    return String(a || "").localeCompare(
+        String(b || ""),
+        "ja",
+        {
+            numeric: true,
+            sensitivity: "base"
+        }
+    );
+}
+
+
+/* ==========================================
+   Supabaseから受付情報取得
+========================================== */
+
+async function loadReception() {
+
+    const content =
+        document.getElementById("content");
+
+    const lastUpdate =
+        document.getElementById("lastUpdate");
+
+    document.getElementById("eventName")
+        .textContent = EVENT_ID;
+
+    lastUpdate.textContent =
+        "更新しています...";
+
+    try {
+
+        const eventFilter =
+            encodeURIComponent(EVENT_ID);
+
+        const url =
+            SUPABASE_URL +
+            "/rest/v1/reception_status" +
+            "?select=*" +
+            "&event_id=eq." + eventFilter +
+            "&received=eq.true";
+
+        const response =
+            await fetch(
+                url,
+                {
+                    headers: {
+                        "apikey": SUPABASE_KEY
+                    },
+                    cache: "no-store"
+                }
+            );
+
+        if (!response.ok) {
+
+            const text =
+                await response.text();
+
+            throw new Error(
+                response.status +
+                " " +
+                text
+            );
+        }
+
+        const data =
+            await response.json();
+
+
+        /* ==================================
+           データなし
+        ================================== */
+
+        if (!data.length) {
+
+            content.innerHTML =
+                '<div class="empty">' +
+                '現在、受付済みの演者はいません。' +
+                '</div>';
+
+            lastUpdate.textContent =
+                "最終確認 " +
+                new Date().toLocaleTimeString(
+                    "ja-JP"
+                );
+
+            return;
+        }
+
+
+        /* ==================================
+           会場 → セッションで分類
+        ================================== */
+
+        const rooms = {};
+
+        data.forEach(row => {
+
+            const room =
+                row.room || "会場未設定";
+
+            const session =
+                row.session || "セッション未設定";
+
+            if (!rooms[room])
+                rooms[room] = {};
+
+            if (!rooms[room][session])
+                rooms[room][session] = [];
+
+            rooms[room][session].push(row);
+        });
+
+
+        /* ==================================
+           HTML生成
+        ================================== */
+
+        let html = "";
+
+        const roomNames =
+            Object.keys(rooms)
+                .sort(naturalCompare);
+
+        roomNames.forEach(room => {
+
+            html +=
+                '<section class="room">';
+
+            html +=
+                '<div class="room-title">' +
+                escapeHtml(room) +
+                '</div>';
+
+
+            const sessions =
+                Object.keys(rooms[room]);
+
+            sessions.forEach(session => {
+
+                const speakers =
+                    rooms[room][session];
+
+                speakers.sort(
+                    (a,b) =>
+                        naturalCompare(
+                            a.number,
+                            b.number
+                        )
+                );
+
+                html +=
+                    '<div class="session">';
+
+                html +=
+                    '<div class="session-title">' +
+                    escapeHtml(session) +
+                    '</div>';
+
+
+                speakers.forEach(row => {
+
+                    html +=
+                        '<div class="speaker">';
+
+                    html +=
+                        '<div class="number">' +
+                        escapeHtml(row.number) +
+                        '</div>';
+
+                    html +=
+                        '<div class="name">' +
+                        escapeHtml(row.speaker) +
+                        '</div>';
+
+                    html +=
+                        '<div class="received">' +
+                        '受付済み' +
+                        '</div>';
+
+                    html +=
+                        '</div>';
+                });
+
+                html +=
+                    '</div>';
+            });
+
+            html +=
+                '</section>';
+        });
+
+
+        content.innerHTML = html;
+
+
+        /* ==================================
+           Supabase上の最新更新日時
+        ================================== */
+
+        const latest =
+            data
+                .map(x => x.updated_at)
+                .filter(Boolean)
+                .sort()
+                .pop();
+
+        if (latest) {
+
+            const d =
+                new Date(latest);
+
+            lastUpdate.textContent =
+                "データ更新 " +
+                d.toLocaleString(
+                    "ja-JP"
+                );
+
+        } else {
+
+            lastUpdate.textContent =
+                "最終確認 " +
+                new Date().toLocaleTimeString(
+                    "ja-JP"
+                );
+        }
+
+    }
+    catch(error) {
+
+        console.error(error);
+
+        content.innerHTML =
+            '<div class="error">' +
+            '受付情報を取得できません。<br>' +
+            'しばらくしてから更新してください。' +
+            '</div>';
+
+        lastUpdate.textContent =
+            "通信エラー";
+    }
+}
+
+
+/* ==========================================
+   初回読み込み
+========================================== */
+
+loadReception();
+
+
+/* ==========================================
+   30秒ごとに自動更新
+========================================== */
+
+setInterval(
+    loadReception,
+    30000
+);
+
+</script>
+
+</body>
+</html>
