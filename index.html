@@ -134,6 +134,26 @@ button {
     margin-right: 5px;
 }
 
+.pending {
+    font-weight: bold;
+    color: #666;
+    white-space: nowrap;
+}
+.pending::before {
+    content: "○";
+    margin-right: 5px;
+}
+
+.finished {
+    font-weight: bold;
+    color: #222;
+    white-space: nowrap;
+}
+.finished::before {
+    content: "●";
+    margin-right: 5px;
+}
+
 .loading,
 .empty,
 .error {
@@ -298,8 +318,7 @@ async function loadReception() {
             SUPABASE_URL +
             "/rest/v1/reception_status" +
             "?select=*" +
-            "&event_id=eq." + eventFilter +
-            "&received=eq.true";
+            "&event_id=eq." + eventFilter;
 
         const response =
             await fetch(
@@ -336,7 +355,7 @@ async function loadReception() {
 
             content.innerHTML =
                 '<div class="empty">' +
-                '現在、受付済みの演者はいません。' +
+                '現在、登録されている演者はいません。' +
                 '</div>';
 
             lastUpdate.textContent =
@@ -434,9 +453,21 @@ async function loadReception() {
                         escapeHtml(row.speaker) +
                         '</div>';
 
+                    let statusClass = "pending";
+                    let statusText = "未受付";
+
+                    if (row.finished === true) {
+                        statusClass = "finished";
+                        statusText = "終了";
+                    }
+                    else if (row.received === true) {
+                        statusClass = "received";
+                        statusText = "受付済み";
+                    }
+
                     html +=
-                        '<div class="received">' +
-                        '受付済み' +
+                        '<div class="' + statusClass + '">' +
+                        statusText +
                         '</div>';
 
                     html +=
@@ -511,12 +542,12 @@ loadReception();
 
 
 /* ==========================================
-   30秒ごとに自動更新
+   10秒ごとに自動更新
 ========================================== */
 
 setInterval(
     loadReception,
-    30000
+    10000
 );
 
 </script>
