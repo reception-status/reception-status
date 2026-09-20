@@ -419,6 +419,34 @@ body {
     }
 }
 
+
+.event-select-area {
+    background:#fff;
+    border-radius:10px;
+    padding:12px 16px;
+    margin-bottom:12px;
+}
+.event-select-area label {
+    display:block;
+    font-size:13px;
+    color:#666;
+    margin-bottom:5px;
+}
+.event-select-area select {
+    width:100%;
+    padding:10px;
+    border:1px solid #ccc;
+    border-radius:7px;
+    background:#fff;
+    font-size:16px;
+}
+.retry-button {
+    margin-top:12px;
+}
+@media (max-width:600px) {
+    .event-select-area { padding:10px 12px; }
+    .event-select-area select { min-height:44px; }
+}
 </style>
 </head>
 
@@ -426,10 +454,17 @@ body {
 
 <header>
     <h1>受付状況</h1>
-    <div id="eventName"></div>
+    <div id="eventName">学会を選択してください</div>
 </header>
 
 <main class="status-area">
+
+    <div class="event-select-area">
+        <label for="eventSelect">学会を選択</label>
+        <select id="eventSelect">
+            <option value="">読み込み中...</option>
+        </select>
+    </div>
 
     <div class="update-area">
         <div id="lastUpdate">読み込み中...</div>
@@ -474,8 +509,7 @@ const SUPABASE_KEY =
 const params =
     new URLSearchParams(window.location.search);
 
-const EVENT_ID =
-    params.get("event") || "0920_test学会";
+let EVENT_ID = params.get("event") || "";
 
 
 /* ==========================================
@@ -519,7 +553,7 @@ function naturalCompare(a, b) {
 
 let receptionData = [];
 let hierarchyData = [];
-}
+const eventSelect = document.getElementById("eventSelect");
 
 function statusInfo(row) {
     if (row && (row.status === "received" || row.received === true))
@@ -535,69 +569,52 @@ function nodeKey(parts) {
     return parts.map(x => String(x || "")).join("|||");
 }
 
-function buildTreeModel() {
-    const dates = {};
+function fetchWithTimeout(url, options={}, timeout=10000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    return fetch(url, {...options, signal: controller.signal})
+        .finally(() => clearTimeout(timer));
+}
 
-    hierarchyData.forEach(item => {
-        const date = String(item.date || "");
-        const room = String(item.room || "");
-        const session = String(item.session || "");
-        if (!date) return;
-        if (!dates[date]) dates[date] = {};
-        if (room && !dates[date][room]) dates[date][room] = new Set();
-        if (room && session) dates[date][room].add(session);
-    });
-
-    receptionData.forEach(row => {
-        const date = String(row.date || "");
-        const room = String(row.room || "");
-        const session = String(row.session || "");
-        if (!date) return;
-        if (!dates[date]) dates[date] = {};
-        if (room && !dates[date][room]) dates[date][room] = new Set();
-        if (room && session) dates[date][room].add(session);
-    });
-
-    return dates;
+function showError(message) {
+    const content = document.getElementById("content");
+    content.innerHTML =
+        '<div class="error">' +
+        escapeHtml(message) +
+        '<br><button class="retry-button" onclick="initializePage()">再読み込み</button>' +
+        '</div>';
+    document.getElementById("lastUpdate").textContent = "通信エラー";
 }
 
 function makeToggle(label) {
     const btn = document.createElement("button");
     btn.className = "tree-toggle";
     btn.type = "button";
-
     const arrow = document.createElement("span");
     arrow.className = "tree-arrow";
     arrow.textContent = "▶";
-
     btn.appendChild(arrow);
     btn.appendChild(document.createTextNode(label));
     return btn;
 }
 
 function bindToggle(node, btn) {
-    btn.addEventListener("click", () => {
-        node.classList.toggle("tree-open");
-    });
+    btn.addEventListener("click", () => node.classList.toggle("tree-open"));
 }
 
 function speakerElement(row) {
     const div = document.createElement("div");
     div.className = "tree-speaker";
-
     const number = document.createElement("div");
     number.className = "number";
     number.textContent = row.number || "";
-
     const name = document.createElement("div");
     name.className = "name";
     name.textContent = row.speaker || "";
-
     const st = statusInfo(row);
     const status = document.createElement("div");
     status.className = st.cls;
     status.textContent = st.text;
-
     div.append(number, name, status);
     return div;
 }
@@ -609,29 +626,41 @@ function emptyElement(text) {
     return div;
 }
 
+function buildTreeModel() {
+    const dates = {};
+    hierarchyData.forEach(item => {
+        const date = String(item.date || "");
+        const room = String(item.room || "");
+        const session = String(item.session || "");
+        if (!date) return;
+        if (!dates[date]) dates[date] = {};
+        if (room && !dates[date][room]) dates[date][room] = new Set();
+        if (room && session) dates[date][room].add(session);
+    });
+    receptionData.forEach(row => {
+        const date = String(row.date || "");
+        const room = String(row.room || "");
+        const session = String(row.session || "");
+        if (!date) return;
+        if (!dates[date]) dates[date] = {};
+        if (room && !dates[date][room]) dates[date][room] = new Set();
+        if (room && session) dates[date][room].add(session);
+    });
+    return dates;
+}
+
 function renderTree() {
     const content = document.getElementById("content");
     const dates = buildTreeModel();
     const dateNames = Object.keys(dates).sort(naturalCompare);
 
     if (!dateNames.length) {
-        if (!content.querySelector(".empty")) {
-            content.replaceChildren();
-            const empty = document.createElement("div");
-            empty.className = "empty";
-            empty.textContent = "現在、登録されている階層はありません。";
-            content.appendChild(empty);
-        }
+        content.innerHTML = '<div class="empty">現在、登録されている階層・演者はいません。</div>';
         return;
     }
 
-    // 現在のDOMをキーで取得。既存ノードは作り直さないため、
-    // 展開中の tree-open が10秒更新でも絶対に失われない。
     const existing = new Map();
-    content.querySelectorAll(".tree-node[data-key]").forEach(el => {
-        existing.set(el.dataset.key, el);
-    });
-
+    content.querySelectorAll(".tree-node[data-key]").forEach(el => existing.set(el.dataset.key, el));
     const wantedKeys = new Set();
 
     function getOrCreateNode(key, cls, label) {
@@ -641,20 +670,11 @@ function renderTree() {
             node = document.createElement("div");
             node.className = "tree-node " + cls;
             node.dataset.key = key;
-
             const btn = makeToggle(label);
             const children = document.createElement("div");
             children.className = "tree-children";
             node.append(btn, children);
             bindToggle(node, btn);
-        } else {
-            const btn = node.querySelector(":scope > .tree-toggle");
-            if (btn) {
-                const arrow = btn.querySelector(".tree-arrow");
-                btn.replaceChildren();
-                if (arrow) btn.appendChild(arrow);
-                btn.appendChild(document.createTextNode(label));
-            }
         }
         return node;
     }
@@ -662,23 +682,19 @@ function renderTree() {
     const fragment = document.createDocumentFragment();
 
     dateNames.forEach(date => {
-        const dateKey = nodeKey([date]);
-        const dateNode = getOrCreateNode(dateKey, "tree-date", date);
+        const dateNode = getOrCreateNode(nodeKey([date]), "tree-date", date);
         const dateChildren = dateNode.querySelector(":scope > .tree-children");
         const roomFrag = document.createDocumentFragment();
-
         const rooms = Object.keys(dates[date]).sort(naturalCompare);
+
         rooms.forEach(room => {
-            const roomKey = nodeKey([date, room]);
-            const roomNode = getOrCreateNode(roomKey, "tree-room", room);
+            const roomNode = getOrCreateNode(nodeKey([date,room]), "tree-room", room);
             const roomChildren = roomNode.querySelector(":scope > .tree-children");
             const sessionFrag = document.createDocumentFragment();
 
             let sessions = [...dates[date][room]].sort(naturalCompare);
             const directSpeakers = receptionData.filter(x =>
-                String(x.date || "") === date &&
-                String(x.room || "") === room &&
-                !String(x.session || "")
+                String(x.date||"") === date && String(x.room||"") === room && !String(x.session||"")
             );
             if (directSpeakers.length) sessions = ["", ...sessions];
 
@@ -686,24 +702,22 @@ function renderTree() {
                 roomChildren.replaceChildren(emptyElement("セッションはまだ登録されていません。"));
             } else {
                 sessions.forEach(session => {
-                    const label = session || "演者";
-                    const sessionKey = nodeKey([date, room, session]);
-                    const sessionNode = getOrCreateNode(sessionKey, "tree-session", label);
+                    const sessionNode = getOrCreateNode(
+                        nodeKey([date,room,session]),
+                        "tree-session",
+                        session || "演者"
+                    );
                     const sessionChildren = sessionNode.querySelector(":scope > .tree-children");
-
                     const speakers = receptionData.filter(x =>
-                        String(x.date || "") === date &&
-                        String(x.room || "") === room &&
-                        String(x.session || "") === session
+                        String(x.date||"") === date &&
+                        String(x.room||"") === room &&
+                        String(x.session||"") === session
                     ).sort((a,b) => naturalCompare(a.number,b.number));
 
                     const speakerFrag = document.createDocumentFragment();
-                    if (!speakers.length) {
-                        speakerFrag.appendChild(emptyElement("演者はまだ登録されていません。"));
-                    } else {
-                        speakers.forEach(row => speakerFrag.appendChild(speakerElement(row)));
-                    }
-                    // 演者行だけ更新。sessionNode自体は維持する。
+                    if (!speakers.length) speakerFrag.appendChild(emptyElement("演者はまだ登録されていません。"));
+                    else speakers.forEach(row => speakerFrag.appendChild(speakerElement(row)));
+
                     sessionChildren.replaceChildren(speakerFrag);
                     sessionFrag.appendChild(sessionNode);
                 });
@@ -712,60 +726,116 @@ function renderTree() {
             roomFrag.appendChild(roomNode);
         });
 
-        if (!rooms.length) {
-            dateChildren.replaceChildren(emptyElement("会場はまだ登録されていません。"));
-        } else {
-            dateChildren.replaceChildren(roomFrag);
-        }
+        if (!rooms.length) dateChildren.replaceChildren(emptyElement("会場はまだ登録されていません。"));
+        else dateChildren.replaceChildren(roomFrag);
+
         fragment.appendChild(dateNode);
     });
 
-    // 古くなったノードだけ除去。
-    existing.forEach((node, key) => {
+    existing.forEach((node,key) => {
         if (!wantedKeys.has(key) && node.isConnected) node.remove();
     });
-
-    // トップレベルの日付ノードを並べ直すが、同じDOM要素を移動するだけ。
     content.replaceChildren(fragment);
 }
 
+async function loadEventList() {
+    eventSelect.innerHTML = '<option value="">学会を選択してください</option>';
+
+    const urls = [
+        SUPABASE_URL + "/rest/v1/reception_hierarchy?select=event_id",
+        SUPABASE_URL + "/rest/v1/reception_status?select=event_id"
+    ];
+
+    const results = await Promise.all(urls.map(url =>
+        fetchWithTimeout(url, {
+            headers: {"apikey": SUPABASE_KEY},
+            cache: "no-store"
+        })
+    ));
+
+    for (const response of results) {
+        if (!response.ok) throw new Error(response.status + " " + await response.text());
+    }
+
+    const all = [
+        ...await results[0].json(),
+        ...await results[1].json()
+    ];
+
+    const events = [...new Set(all.map(x => x.event_id).filter(Boolean))].sort(naturalCompare);
+
+    events.forEach(eventId => {
+        const option = document.createElement("option");
+        option.value = eventId;
+        option.textContent = eventId;
+        eventSelect.appendChild(option);
+    });
+
+    if (EVENT_ID && events.includes(EVENT_ID)) {
+        eventSelect.value = EVENT_ID;
+    } else if (events.length === 1) {
+        EVENT_ID = events[0];
+        eventSelect.value = EVENT_ID;
+    }
+}
+
 async function loadReception() {
-    const content = document.getElementById("content");
+    if (!EVENT_ID) {
+        document.getElementById("eventName").textContent = "学会を選択してください";
+        document.getElementById("content").innerHTML =
+            '<div class="empty">上の「学会を選択」から受付状況を表示する学会を選んでください。</div>';
+        document.getElementById("lastUpdate").textContent = "学会未選択";
+        return;
+    }
+
     const lastUpdate = document.getElementById("lastUpdate");
     document.getElementById("eventName").textContent = EVENT_ID;
     lastUpdate.textContent = "更新しています...";
 
+    const eventFilter = encodeURIComponent(EVENT_ID);
+    const statusUrl = SUPABASE_URL + "/rest/v1/reception_status?select=*" + "&event_id=eq." + eventFilter;
+    const hierarchyUrl = SUPABASE_URL + "/rest/v1/reception_hierarchy?select=*" + "&event_id=eq." + eventFilter;
+
+    const [statusResponse, hierarchyResponse] = await Promise.all([
+        fetchWithTimeout(statusUrl, {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"}),
+        fetchWithTimeout(hierarchyUrl, {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"})
+    ]);
+
+    if (!statusResponse.ok) throw new Error(statusResponse.status + " " + await statusResponse.text());
+    if (!hierarchyResponse.ok) throw new Error(hierarchyResponse.status + " " + await hierarchyResponse.text());
+
+    receptionData = await statusResponse.json();
+    hierarchyData = await hierarchyResponse.json();
+    renderTree();
+
+    const latest = [...receptionData, ...hierarchyData]
+        .map(x => x.updated_at).filter(Boolean).sort().pop();
+    lastUpdate.textContent = latest
+        ? "データ更新 " + new Date(latest).toLocaleString("ja-JP")
+        : "最終確認 " + new Date().toLocaleTimeString("ja-JP");
+}
+
+async function initializePage() {
     try {
-        const eventFilter = encodeURIComponent(EVENT_ID);
-        const statusUrl = SUPABASE_URL + "/rest/v1/reception_status?select=*" +
-            "&event_id=eq." + eventFilter;
-        const hierarchyUrl = SUPABASE_URL + "/rest/v1/reception_hierarchy?select=*" +
-            "&event_id=eq." + eventFilter;
-
-        const [statusResponse, hierarchyResponse] = await Promise.all([
-            fetch(statusUrl, {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"}),
-            fetch(hierarchyUrl, {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"})
-        ]);
-
-        if (!statusResponse.ok) throw new Error(statusResponse.status + " " + await statusResponse.text());
-        if (!hierarchyResponse.ok) throw new Error(hierarchyResponse.status + " " + await hierarchyResponse.text());
-
-        receptionData = await statusResponse.json();
-        hierarchyData = await hierarchyResponse.json();
-
-        renderTree();
-
-        const latest = [...receptionData, ...hierarchyData]
-            .map(x => x.updated_at).filter(Boolean).sort().pop();
-        lastUpdate.textContent = latest
-            ? "データ更新 " + new Date(latest).toLocaleString("ja-JP")
-            : "最終確認 " + new Date().toLocaleTimeString("ja-JP");
+        await loadEventList();
+        await initializePage();
     } catch(error) {
         console.error(error);
-        content.innerHTML = '<div class="error">受付情報を取得できません。<br>しばらくしてから更新してください。</div>';
-        lastUpdate.textContent = "通信エラー";
+        showError("受付情報を取得できません。通信環境を確認して再読み込みしてください。");
     }
 }
+
+eventSelect.addEventListener("change", async () => {
+    EVENT_ID = eventSelect.value;
+    receptionData = [];
+    hierarchyData = [];
+    try {
+        await loadReception();
+    } catch(error) {
+        console.error(error);
+        showError("選択した学会の受付情報を取得できません。");
+    }
+});
 
 
 /* ==========================================
@@ -779,10 +849,13 @@ loadReception();
    10秒ごとに自動更新
 ========================================== */
 
-setInterval(
-    loadReception,
-    10000
-);
+setInterval(() => {
+    if (!EVENT_ID) return;
+    loadReception().catch(error => {
+        console.error(error);
+        document.getElementById("lastUpdate").textContent = "更新失敗・次回再試行";
+    });
+}, 10000);
 
 </script>
 
