@@ -818,7 +818,7 @@ async function loadReception() {
 async function initializePage() {
     try {
         await loadEventList();
-        await initializePage();
+        await loadReception();
     } catch(error) {
         console.error(error);
         showError("受付情報を取得できません。通信環境を確認して再読み込みしてください。");
@@ -842,7 +842,7 @@ eventSelect.addEventListener("change", async () => {
    初回読み込み
 ========================================== */
 
-loadReception();
+initializePage();
 
 
 /* ==========================================
