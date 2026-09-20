@@ -408,6 +408,7 @@ function naturalCompare(a, b) {
 
 let receptionData = [];
 let hierarchyData = [];
+const openTreeNodes = new Set();
 
 function statusInfo(row) {
     if (row && (row.status === "received" || row.received === true))
@@ -457,14 +458,14 @@ function renderTree() {
 
     dateNames.forEach(date => {
         const dateKey = nodeKey([date]);
-        html += '<div class="tree-node tree-date" data-key="' + escapeHtml(dateKey) + '">';
+        html += '<div class="tree-node tree-date' + (openTreeNodes.has(dateKey) ? ' tree-open' : '') + '" data-key="' + escapeHtml(dateKey) + '">';
         html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(date) + '</button>';
         html += '<div class="tree-children">';
 
         const rooms = Object.keys(dates[date]).sort(naturalCompare);
         rooms.forEach(room => {
             const roomKey = nodeKey([date,room]);
-            html += '<div class="tree-node tree-room" data-key="' + escapeHtml(roomKey) + '">';
+            html += '<div class="tree-node tree-room' + (openTreeNodes.has(roomKey) ? ' tree-open' : '') + '" data-key="' + escapeHtml(roomKey) + '">';
             html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(room) + '</button>';
             html += '<div class="tree-children">';
 
@@ -485,7 +486,7 @@ function renderTree() {
             sessions.forEach(session => {
                 const label = session || "演者";
                 const sessionKey = nodeKey([date,room,session]);
-                html += '<div class="tree-node tree-session" data-key="' + escapeHtml(sessionKey) + '">';
+                html += '<div class="tree-node tree-session' + (openTreeNodes.has(sessionKey) ? ' tree-open' : '') + '" data-key="' + escapeHtml(sessionKey) + '">';
                 html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(label) + '</button>';
                 html += '<div class="tree-children">';
 
@@ -522,7 +523,13 @@ function renderTree() {
 
     content.querySelectorAll(".tree-toggle").forEach(btn => {
         btn.addEventListener("click", () => {
-            btn.parentElement.classList.toggle("tree-open");
+            const node = btn.parentElement;
+            const key = node.dataset.key;
+            const willOpen = !node.classList.contains("tree-open");
+            node.classList.toggle("tree-open");
+
+            if (willOpen) openTreeNodes.add(key);
+            else openTreeNodes.delete(key);
         });
     });
 }
