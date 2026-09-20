@@ -185,6 +185,49 @@ footer {
     font-size: 12px;
 }
 
+
+.filter-area {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 15px;
+}
+.filter-title {
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+.filter-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0,1fr));
+    gap: 10px;
+}
+.filter-grid label {
+    display: block;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 4px;
+}
+.filter-grid select {
+    width: 100%;
+    padding: 9px;
+    border: 1px solid #ccc;
+    border-radius: 7px;
+    background: #fff;
+}
+.path {
+    font-size: 12px;
+    color: #777;
+    margin-top: 3px;
+}
+.date-title {
+    font-size: 20px;
+    font-weight: bold;
+    margin: 18px 2px 10px;
+}
+@media (max-width: 600px) {
+    .filter-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 600px) {
 
     header h1 {
@@ -226,6 +269,15 @@ footer {
     <div class="update-area">
         <div id="lastUpdate">読み込み中...</div>
         <button onclick="loadReception()">更新</button>
+    </div>
+
+    <div class="filter-area">
+        <div class="filter-title">表示する階層を選択</div>
+        <div class="filter-grid">
+            <div><label>日付</label><select id="dateFilter"></select></div>
+            <div><label>会場</label><select id="roomFilter"></select></div>
+            <div><label>セッション</label><select id="sessionFilter"></select></div>
+        </div>
     </div>
 
     <div id="content">
@@ -306,249 +358,164 @@ function naturalCompare(a, b) {
    Supabaseから受付情報取得
 ========================================== */
 
-async function loadReception() {
+let receptionData = [];
 
-    const content =
-        document.getElementById("content");
+function uniqSorted(values) {
+    return [...new Set(values.filter(v => v !== null && v !== undefined && String(v).trim() !== ""))]
+        .sort(naturalCompare);
+}
 
-    const lastUpdate =
-        document.getElementById("lastUpdate");
+function setOptions(select, values, allLabel, keepValue) {
+    const old = keepValue ?? select.value;
+    select.innerHTML = '<option value="">' + escapeHtml(allLabel) + '</option>' +
+        values.map(v => '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>').join("");
+    if ([...select.options].some(o => o.value === old)) select.value = old;
+}
 
-    document.getElementById("eventName")
-        .textContent = EVENT_ID;
+function refreshFilters() {
+    const dateSel = document.getElementById("dateFilter");
+    const roomSel = document.getElementById("roomFilter");
+    const sessionSel = document.getElementById("sessionFilter");
 
-    lastUpdate.textContent =
-        "更新しています...";
+    setOptions(dateSel, uniqSorted(receptionData.map(x => x.date)), "すべての日付");
 
-    try {
+    const byDate = receptionData.filter(x => !dateSel.value || String(x.date || "") === dateSel.value);
+    setOptions(roomSel, uniqSorted(byDate.map(x => x.room)), "すべての会場");
 
-        const eventFilter =
-            encodeURIComponent(EVENT_ID);
+    const byRoom = byDate.filter(x => !roomSel.value || String(x.room || "") === roomSel.value);
+    setOptions(sessionSel, uniqSorted(byRoom.map(x => x.session)), "すべてのセッション");
+}
 
-        const url =
-            SUPABASE_URL +
-            "/rest/v1/reception_status" +
-            "?select=*" +
-            "&event_id=eq." + eventFilter;
+function renderReception() {
+    const content = document.getElementById("content");
+    const dateValue = document.getElementById("dateFilter").value;
+    const roomValue = document.getElementById("roomFilter").value;
+    const sessionValue = document.getElementById("sessionFilter").value;
 
-        const response =
-            await fetch(
-                url,
-                {
-                    headers: {
-                        "apikey": SUPABASE_KEY
-                    },
-                    cache: "no-store"
+    const data = receptionData.filter(row =>
+        (!dateValue || String(row.date || "") === dateValue) &&
+        (!roomValue || String(row.room || "") === roomValue) &&
+        (!sessionValue || String(row.session || "") === sessionValue)
+    );
+
+    if (!data.length) {
+        content.innerHTML = '<div class="empty">該当する演者はいません。</div>';
+        return;
+    }
+
+    const dates = {};
+    data.forEach(row => {
+        const date = row.date || "日付未設定";
+        const room = row.room || "会場未設定";
+        const session = row.session || "";
+        if (!dates[date]) dates[date] = {};
+        if (!dates[date][room]) dates[date][room] = {};
+        if (!dates[date][room][session]) dates[date][room][session] = [];
+        dates[date][room][session].push(row);
+    });
+
+    let html = "";
+    Object.keys(dates).sort(naturalCompare).forEach(date => {
+        html += '<div class="date-title">' + escapeHtml(date) + '</div>';
+
+        Object.keys(dates[date]).sort(naturalCompare).forEach(room => {
+            html += '<section class="room">';
+            html += '<div class="room-title">' + escapeHtml(room) + '</div>';
+
+            Object.keys(dates[date][room]).sort(naturalCompare).forEach(session => {
+                const speakers = dates[date][room][session];
+                speakers.sort((a,b) => naturalCompare(a.number,b.number));
+
+                html += '<div class="session">';
+                if (session) {
+                    html += '<div class="session-title">' + escapeHtml(session) + '</div>';
                 }
-            );
-
-        if (!response.ok) {
-
-            const text =
-                await response.text();
-
-            throw new Error(
-                response.status +
-                " " +
-                text
-            );
-        }
-
-        const data =
-            await response.json();
-
-
-        /* ==================================
-           データなし
-        ================================== */
-
-        if (!data.length) {
-
-            content.innerHTML =
-                '<div class="empty">' +
-                '現在、登録されている演者はいません。' +
-                '</div>';
-
-            lastUpdate.textContent =
-                "最終確認 " +
-                new Date().toLocaleTimeString(
-                    "ja-JP"
-                );
-
-            return;
-        }
-
-
-        /* ==================================
-           会場 → セッションで分類
-        ================================== */
-
-        const rooms = {};
-
-        data.forEach(row => {
-
-            const room =
-                row.room || "会場未設定";
-
-            const session =
-                row.session || "セッション未設定";
-
-            if (!rooms[room])
-                rooms[room] = {};
-
-            if (!rooms[room][session])
-                rooms[room][session] = [];
-
-            rooms[room][session].push(row);
-        });
-
-
-        /* ==================================
-           HTML生成
-        ================================== */
-
-        let html = "";
-
-        const roomNames =
-            Object.keys(rooms)
-                .sort(naturalCompare);
-
-        roomNames.forEach(room => {
-
-            html +=
-                '<section class="room">';
-
-            html +=
-                '<div class="room-title">' +
-                escapeHtml(room) +
-                '</div>';
-
-
-            const sessions =
-                Object.keys(rooms[room]);
-
-            sessions.forEach(session => {
-
-                const speakers =
-                    rooms[room][session];
-
-                speakers.sort(
-                    (a,b) =>
-                        naturalCompare(
-                            a.number,
-                            b.number
-                        )
-                );
-
-                html +=
-                    '<div class="session">';
-
-                html +=
-                    '<div class="session-title">' +
-                    escapeHtml(session) +
-                    '</div>';
-
 
                 speakers.forEach(row => {
-
-                    html +=
-                        '<div class="speaker">';
-
-                    html +=
-                        '<div class="number">' +
-                        escapeHtml(row.number) +
-                        '</div>';
-
-                    html +=
-                        '<div class="name">' +
-                        escapeHtml(row.speaker) +
-                        '</div>';
-
                     let statusClass = "pending";
                     let statusText = "未受付";
 
-                    // V9: status を優先して判定
-                    // received > preregistered > pending
                     if (row.status === "received" || row.received === true) {
                         statusClass = "received";
                         statusText = "受付済み";
-                    }
-                    else if (row.status === "preregistered") {
+                    } else if (row.status === "preregistered") {
                         statusClass = "preregistered";
                         statusText = "事前登録";
-                    }
-                    else if (row.status === "finished" || row.finished === true) {
+                    } else if (row.status === "finished" || row.finished === true) {
                         statusClass = "finished";
                         statusText = "終了";
                     }
 
-                    html +=
-                        '<div class="' + statusClass + '">' +
-                        statusText +
-                        '</div>';
+                    const path = [row.date, row.room, row.session, [row.number,row.speaker].filter(Boolean).join("_")]
+                        .filter(Boolean).join(" ＞ ");
 
-                    html +=
+                    html += '<div class="speaker">' +
+                        '<div class="number">' + escapeHtml(row.number) + '</div>' +
+                        '<div class="name">' + escapeHtml(row.speaker) +
+                        '<div class="path">' + escapeHtml(path) + '</div></div>' +
+                        '<div class="' + statusClass + '">' + statusText + '</div>' +
                         '</div>';
                 });
-
-                html +=
-                    '</div>';
+                html += '</div>';
             });
+            html += '</section>';
+        });
+    });
+    content.innerHTML = html;
+}
 
-            html +=
-                '</section>';
+async function loadReception() {
+    const content = document.getElementById("content");
+    const lastUpdate = document.getElementById("lastUpdate");
+    document.getElementById("eventName").textContent = EVENT_ID;
+    lastUpdate.textContent = "更新しています...";
+
+    try {
+        const eventFilter = encodeURIComponent(EVENT_ID);
+        const url = SUPABASE_URL + "/rest/v1/reception_status?select=*" +
+            "&event_id=eq." + eventFilter;
+
+        const response = await fetch(url, {
+            headers: {"apikey": SUPABASE_KEY},
+            cache: "no-store"
         });
 
+        if (!response.ok) throw new Error(response.status + " " + await response.text());
 
-        content.innerHTML = html;
+        receptionData = await response.json();
 
-
-        /* ==================================
-           Supabase上の最新更新日時
-        ================================== */
-
-        const latest =
-            data
-                .map(x => x.updated_at)
-                .filter(Boolean)
-                .sort()
-                .pop();
-
-        if (latest) {
-
-            const d =
-                new Date(latest);
-
-            lastUpdate.textContent =
-                "データ更新 " +
-                d.toLocaleString(
-                    "ja-JP"
-                );
-
-        } else {
-
-            lastUpdate.textContent =
-                "最終確認 " +
-                new Date().toLocaleTimeString(
-                    "ja-JP"
-                );
+        if (!receptionData.length) {
+            content.innerHTML = '<div class="empty">現在、登録されている演者はいません。</div>';
+            lastUpdate.textContent = "最終確認 " + new Date().toLocaleTimeString("ja-JP");
+            refreshFilters();
+            return;
         }
 
-    }
-    catch(error) {
+        refreshFilters();
+        renderReception();
 
+        const latest = receptionData.map(x => x.updated_at).filter(Boolean).sort().pop();
+        lastUpdate.textContent = latest
+            ? "データ更新 " + new Date(latest).toLocaleString("ja-JP")
+            : "最終確認 " + new Date().toLocaleTimeString("ja-JP");
+    } catch(error) {
         console.error(error);
-
-        content.innerHTML =
-            '<div class="error">' +
-            '受付情報を取得できません。<br>' +
-            'しばらくしてから更新してください。' +
-            '</div>';
-
-        lastUpdate.textContent =
-            "通信エラー";
+        content.innerHTML = '<div class="error">受付情報を取得できません。<br>しばらくしてから更新してください。</div>';
+        lastUpdate.textContent = "通信エラー";
     }
 }
+
+document.getElementById("dateFilter").addEventListener("change", () => {
+    const room = document.getElementById("roomFilter");
+    const session = document.getElementById("sessionFilter");
+    room.value = ""; session.value = "";
+    refreshFilters(); renderReception();
+});
+document.getElementById("roomFilter").addEventListener("change", () => {
+    document.getElementById("sessionFilter").value = "";
+    refreshFilters(); renderReception();
+});
+document.getElementById("sessionFilter").addEventListener("change", renderReception);
 
 
 /* ==========================================
