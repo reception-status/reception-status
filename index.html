@@ -408,22 +408,6 @@ function naturalCompare(a, b) {
 
 let receptionData = [];
 let hierarchyData = [];
-const TREE_STORAGE_KEY = "kyoeisha_open_tree_" + EVENT_ID;
-
-function loadOpenTreeNodes() {
-    try {
-        return new Set(JSON.parse(localStorage.getItem(TREE_STORAGE_KEY) || "[]"));
-    } catch (_) {
-        return new Set();
-    }
-}
-
-const openTreeNodes = loadOpenTreeNodes();
-
-function saveOpenTreeNodes() {
-    try {
-        localStorage.setItem(TREE_STORAGE_KEY, JSON.stringify([...openTreeNodes]));
-    } catch (_) {}
 }
 
 function statusInfo(row) {
@@ -440,138 +424,198 @@ function nodeKey(parts) {
     return parts.map(x => String(x || "")).join("|||");
 }
 
+function buildTreeModel() {
+    const dates = {};
+
+    hierarchyData.forEach(item => {
+        const date = String(item.date || "");
+        const room = String(item.room || "");
+        const session = String(item.session || "");
+        if (!date) return;
+        if (!dates[date]) dates[date] = {};
+        if (room && !dates[date][room]) dates[date][room] = new Set();
+        if (room && session) dates[date][room].add(session);
+    });
+
+    receptionData.forEach(row => {
+        const date = String(row.date || "");
+        const room = String(row.room || "");
+        const session = String(row.session || "");
+        if (!date) return;
+        if (!dates[date]) dates[date] = {};
+        if (room && !dates[date][room]) dates[date][room] = new Set();
+        if (room && session) dates[date][room].add(session);
+    });
+
+    return dates;
+}
+
+function makeToggle(label) {
+    const btn = document.createElement("button");
+    btn.className = "tree-toggle";
+    btn.type = "button";
+
+    const arrow = document.createElement("span");
+    arrow.className = "tree-arrow";
+    arrow.textContent = "▶";
+
+    btn.appendChild(arrow);
+    btn.appendChild(document.createTextNode(label));
+    return btn;
+}
+
+function bindToggle(node, btn) {
+    btn.addEventListener("click", () => {
+        node.classList.toggle("tree-open");
+    });
+}
+
+function speakerElement(row) {
+    const div = document.createElement("div");
+    div.className = "tree-speaker";
+
+    const number = document.createElement("div");
+    number.className = "number";
+    number.textContent = row.number || "";
+
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = row.speaker || "";
+
+    const st = statusInfo(row);
+    const status = document.createElement("div");
+    status.className = st.cls;
+    status.textContent = st.text;
+
+    div.append(number, name, status);
+    return div;
+}
+
+function emptyElement(text) {
+    const div = document.createElement("div");
+    div.className = "tree-empty";
+    div.textContent = text;
+    return div;
+}
+
 function renderTree() {
     const content = document.getElementById("content");
-
-    const dates = {};
-    hierarchyData.forEach(h => {
-        const d = h.date || "";
-        if (!d) return;
-        if (!dates[d]) dates[d] = {};
-        const r = h.room || "";
-        if (r && !dates[d][r]) dates[d][r] = new Set();
-        if (r && h.session) dates[d][r].add(h.session);
-    });
-
-    // Speaker data can fill gaps if hierarchy table has not caught up yet.
-    receptionData.forEach(row => {
-        const d = row.date || "";
-        const r = row.room || "";
-        const s = row.session || "";
-        if (!d) return;
-        if (!dates[d]) dates[d] = {};
-        if (r && !dates[d][r]) dates[d][r] = new Set();
-        if (r && s) dates[d][r].add(s);
-    });
-
+    const dates = buildTreeModel();
     const dateNames = Object.keys(dates).sort(naturalCompare);
 
-    // 現在存在する階層キーだけを残す。10秒更新でも展開状態を維持する。
-    const validKeys = new Set();
-    dateNames.forEach(date => {
-        validKeys.add(nodeKey([date]));
-        Object.keys(dates[date]).forEach(room => {
-            validKeys.add(nodeKey([date, room]));
-            [...dates[date][room]].forEach(session => {
-                validKeys.add(nodeKey([date, room, session]));
-            });
-            const directExists = receptionData.some(x =>
-                String(x.date||"") === date &&
-                String(x.room||"") === room &&
-                !String(x.session||"")
-            );
-            if (directExists) validKeys.add(nodeKey([date, room, ""]));
-        });
-    });
-    [...openTreeNodes].forEach(key => {
-        if (!validKeys.has(key)) openTreeNodes.delete(key);
-    });
-    saveOpenTreeNodes();
-
     if (!dateNames.length) {
-        content.innerHTML = '<div class="empty">現在、登録されている階層はありません。</div>';
+        if (!content.querySelector(".empty")) {
+            content.replaceChildren();
+            const empty = document.createElement("div");
+            empty.className = "empty";
+            empty.textContent = "現在、登録されている階層はありません。";
+            content.appendChild(empty);
+        }
         return;
     }
 
-    let html = "";
+    // 現在のDOMをキーで取得。既存ノードは作り直さないため、
+    // 展開中の tree-open が10秒更新でも絶対に失われない。
+    const existing = new Map();
+    content.querySelectorAll(".tree-node[data-key]").forEach(el => {
+        existing.set(el.dataset.key, el);
+    });
+
+    const wantedKeys = new Set();
+
+    function getOrCreateNode(key, cls, label) {
+        wantedKeys.add(key);
+        let node = existing.get(key);
+        if (!node) {
+            node = document.createElement("div");
+            node.className = "tree-node " + cls;
+            node.dataset.key = key;
+
+            const btn = makeToggle(label);
+            const children = document.createElement("div");
+            children.className = "tree-children";
+            node.append(btn, children);
+            bindToggle(node, btn);
+        } else {
+            const btn = node.querySelector(":scope > .tree-toggle");
+            if (btn) {
+                const arrow = btn.querySelector(".tree-arrow");
+                btn.replaceChildren();
+                if (arrow) btn.appendChild(arrow);
+                btn.appendChild(document.createTextNode(label));
+            }
+        }
+        return node;
+    }
+
+    const fragment = document.createDocumentFragment();
 
     dateNames.forEach(date => {
         const dateKey = nodeKey([date]);
-        html += '<div class="tree-node tree-date' + (openTreeNodes.has(dateKey) ? ' tree-open' : '') + '" data-key="' + escapeHtml(dateKey) + '">';
-        html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(date) + '</button>';
-        html += '<div class="tree-children">';
+        const dateNode = getOrCreateNode(dateKey, "tree-date", date);
+        const dateChildren = dateNode.querySelector(":scope > .tree-children");
+        const roomFrag = document.createDocumentFragment();
 
         const rooms = Object.keys(dates[date]).sort(naturalCompare);
         rooms.forEach(room => {
-            const roomKey = nodeKey([date,room]);
-            html += '<div class="tree-node tree-room' + (openTreeNodes.has(roomKey) ? ' tree-open' : '') + '" data-key="' + escapeHtml(roomKey) + '">';
-            html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(room) + '</button>';
-            html += '<div class="tree-children">';
+            const roomKey = nodeKey([date, room]);
+            const roomNode = getOrCreateNode(roomKey, "tree-room", room);
+            const roomChildren = roomNode.querySelector(":scope > .tree-children");
+            const sessionFrag = document.createDocumentFragment();
 
             let sessions = [...dates[date][room]].sort(naturalCompare);
             const directSpeakers = receptionData.filter(x =>
-                String(x.date||"") === date &&
-                String(x.room||"") === room &&
-                !String(x.session||"")
+                String(x.date || "") === date &&
+                String(x.room || "") === room &&
+                !String(x.session || "")
             );
-
-            // Speakers directly under room are shown in a virtual "演者" section.
             if (directSpeakers.length) sessions = ["", ...sessions];
 
             if (!sessions.length) {
-                html += '<div class="tree-empty">セッションはまだ登録されていません。</div>';
+                roomChildren.replaceChildren(emptyElement("セッションはまだ登録されていません。"));
+            } else {
+                sessions.forEach(session => {
+                    const label = session || "演者";
+                    const sessionKey = nodeKey([date, room, session]);
+                    const sessionNode = getOrCreateNode(sessionKey, "tree-session", label);
+                    const sessionChildren = sessionNode.querySelector(":scope > .tree-children");
+
+                    const speakers = receptionData.filter(x =>
+                        String(x.date || "") === date &&
+                        String(x.room || "") === room &&
+                        String(x.session || "") === session
+                    ).sort((a,b) => naturalCompare(a.number,b.number));
+
+                    const speakerFrag = document.createDocumentFragment();
+                    if (!speakers.length) {
+                        speakerFrag.appendChild(emptyElement("演者はまだ登録されていません。"));
+                    } else {
+                        speakers.forEach(row => speakerFrag.appendChild(speakerElement(row)));
+                    }
+                    // 演者行だけ更新。sessionNode自体は維持する。
+                    sessionChildren.replaceChildren(speakerFrag);
+                    sessionFrag.appendChild(sessionNode);
+                });
+                roomChildren.replaceChildren(sessionFrag);
             }
-
-            sessions.forEach(session => {
-                const label = session || "演者";
-                const sessionKey = nodeKey([date,room,session]);
-                html += '<div class="tree-node tree-session' + (openTreeNodes.has(sessionKey) ? ' tree-open' : '') + '" data-key="' + escapeHtml(sessionKey) + '">';
-                html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(label) + '</button>';
-                html += '<div class="tree-children">';
-
-                const speakers = receptionData.filter(x =>
-                    String(x.date||"") === date &&
-                    String(x.room||"") === room &&
-                    String(x.session||"") === session
-                ).sort((a,b) => naturalCompare(a.number,b.number));
-
-                if (!speakers.length) {
-                    html += '<div class="tree-empty">演者はまだ登録されていません。</div>';
-                } else {
-                    speakers.forEach(row => {
-                        const st = statusInfo(row);
-                        html += '<div class="tree-speaker">' +
-                            '<div class="number">' + escapeHtml(row.number) + '</div>' +
-                            '<div class="name">' + escapeHtml(row.speaker) + '</div>' +
-                            '<div class="' + st.cls + '">' + st.text + '</div>' +
-                            '</div>';
-                    });
-                }
-
-                html += '</div></div>';
-            });
-
-            html += '</div></div>';
+            roomFrag.appendChild(roomNode);
         });
 
-        if (!rooms.length) html += '<div class="tree-empty">会場はまだ登録されていません。</div>';
-        html += '</div></div>';
+        if (!rooms.length) {
+            dateChildren.replaceChildren(emptyElement("会場はまだ登録されていません。"));
+        } else {
+            dateChildren.replaceChildren(roomFrag);
+        }
+        fragment.appendChild(dateNode);
     });
 
-    content.innerHTML = html;
-
-    content.querySelectorAll(".tree-toggle").forEach(btn => {
-        btn.addEventListener("click", () => {
-            const node = btn.parentElement;
-            const key = node.dataset.key;
-            const willOpen = !node.classList.contains("tree-open");
-            node.classList.toggle("tree-open");
-
-            if (willOpen) openTreeNodes.add(key);
-            else openTreeNodes.delete(key);
-            saveOpenTreeNodes();
-        });
+    // 古くなったノードだけ除去。
+    existing.forEach((node, key) => {
+        if (!wantedKeys.has(key) && node.isConnected) node.remove();
     });
+
+    // トップレベルの日付ノードを並べ直すが、同じDOM要素を移動するだけ。
+    content.replaceChildren(fragment);
 }
 
 async function loadReception() {
