@@ -408,7 +408,23 @@ function naturalCompare(a, b) {
 
 let receptionData = [];
 let hierarchyData = [];
-const openTreeNodes = new Set();
+const TREE_STORAGE_KEY = "kyoeisha_open_tree_" + EVENT_ID;
+
+function loadOpenTreeNodes() {
+    try {
+        return new Set(JSON.parse(localStorage.getItem(TREE_STORAGE_KEY) || "[]"));
+    } catch (_) {
+        return new Set();
+    }
+}
+
+const openTreeNodes = loadOpenTreeNodes();
+
+function saveOpenTreeNodes() {
+    try {
+        localStorage.setItem(TREE_STORAGE_KEY, JSON.stringify([...openTreeNodes]));
+    } catch (_) {}
+}
 
 function statusInfo(row) {
     if (row && (row.status === "received" || row.received === true))
@@ -449,6 +465,29 @@ function renderTree() {
     });
 
     const dateNames = Object.keys(dates).sort(naturalCompare);
+
+    // 現在存在する階層キーだけを残す。10秒更新でも展開状態を維持する。
+    const validKeys = new Set();
+    dateNames.forEach(date => {
+        validKeys.add(nodeKey([date]));
+        Object.keys(dates[date]).forEach(room => {
+            validKeys.add(nodeKey([date, room]));
+            [...dates[date][room]].forEach(session => {
+                validKeys.add(nodeKey([date, room, session]));
+            });
+            const directExists = receptionData.some(x =>
+                String(x.date||"") === date &&
+                String(x.room||"") === room &&
+                !String(x.session||"")
+            );
+            if (directExists) validKeys.add(nodeKey([date, room, ""]));
+        });
+    });
+    [...openTreeNodes].forEach(key => {
+        if (!validKeys.has(key)) openTreeNodes.delete(key);
+    });
+    saveOpenTreeNodes();
+
     if (!dateNames.length) {
         content.innerHTML = '<div class="empty">現在、登録されている階層はありません。</div>';
         return;
@@ -530,6 +569,7 @@ function renderTree() {
 
             if (willOpen) openTreeNodes.add(key);
             else openTreeNodes.delete(key);
+            saveOpenTreeNodes();
         });
     });
 }
