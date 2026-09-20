@@ -281,6 +281,10 @@ footer {
         <div class="path">日付を選ぶと、その日付にある会場だけが会場プルダウンに表示されます。</div>
     </div>
 
+    <div style="font-size:13px;color:#666;margin:0 2px 12px;">
+        ● 緑：受付済み　● 黄：事前登録　○：未受付
+    </div>
+
     <div id="content">
         <div class="loading">
             受付状況を読み込んでいます...
@@ -447,13 +451,9 @@ function renderReception() {
                         statusText = "終了";
                     }
 
-                    const path = [row.date, row.room, row.session, [row.number,row.speaker].filter(Boolean).join("_")]
-                        .filter(Boolean).join(" ＞ ");
-
                     html += '<div class="speaker">' +
                         '<div class="number">' + escapeHtml(row.number) + '</div>' +
-                        '<div class="name">' + escapeHtml(row.speaker) +
-                        '<div class="path">' + escapeHtml(path) + '</div></div>' +
+                        '<div class="name">' + escapeHtml(row.speaker) + '</div>' +
                         '<div class="' + statusClass + '">' + statusText + '</div>' +
                         '</div>';
                 });
