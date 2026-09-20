@@ -198,7 +198,7 @@ footer {
 }
 .filter-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0,1fr));
+    grid-template-columns: repeat(2, minmax(0,1fr));
     gap: 10px;
 }
 .filter-grid label {
@@ -272,12 +272,13 @@ footer {
     </div>
 
     <div class="filter-area">
-        <div class="filter-title">表示する階層を選択</div>
+        <div class="filter-title">日付・会場を選択</div>
         <div class="filter-grid">
             <div><label>日付</label><select id="dateFilter"></select></div>
             <div><label>会場</label><select id="roomFilter"></select></div>
-            <div><label>セッション</label><select id="sessionFilter"></select></div>
+            <div id="sessionFilterWrap" style="display:none"><label>セッション</label><select id="sessionFilter"></select></div>
         </div>
+        <div class="path">日付を選ぶと、その日付にある会場だけが会場プルダウンに表示されます。</div>
     </div>
 
     <div id="content">
@@ -513,7 +514,8 @@ document.getElementById("dateFilter").addEventListener("change", () => {
 });
 document.getElementById("roomFilter").addEventListener("change", () => {
     document.getElementById("sessionFilter").value = "";
-    refreshFilters(); renderReception();
+    refreshFilters();
+    renderReception();
 });
 document.getElementById("sessionFilter").addEventListener("change", renderReception);
 
