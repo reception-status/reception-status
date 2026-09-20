@@ -134,6 +134,17 @@ button {
     margin-right: 5px;
 }
 
+.preregistered {
+    font-weight: bold;
+    color: #b77900;
+    white-space: nowrap;
+}
+
+.preregistered::before {
+    content: "●";
+    margin-right: 5px;
+}
+
 .pending {
     font-weight: bold;
     color: #666;
@@ -253,7 +264,7 @@ const params =
     new URLSearchParams(window.location.search);
 
 const EVENT_ID =
-    params.get("event") || "Test_reception";
+    params.get("event") || "0920_test学会";
 
 
 /* ==========================================
@@ -456,13 +467,19 @@ async function loadReception() {
                     let statusClass = "pending";
                     let statusText = "未受付";
 
-                    if (row.finished === true) {
-                        statusClass = "finished";
-                        statusText = "終了";
-                    }
-                    else if (row.received === true) {
+                    // V9: status を優先して判定
+                    // received > preregistered > pending
+                    if (row.status === "received" || row.received === true) {
                         statusClass = "received";
                         statusText = "受付済み";
+                    }
+                    else if (row.status === "preregistered") {
+                        statusClass = "preregistered";
+                        statusText = "事前登録";
+                    }
+                    else if (row.status === "finished" || row.finished === true) {
+                        statusClass = "finished";
+                        statusText = "終了";
                     }
 
                     html +=
