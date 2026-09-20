@@ -308,6 +308,117 @@ footer {
         font-size: 14px;
     }
 }
+
+/* ===== V30 smartphone responsive UI ===== */
+html {
+    -webkit-text-size-adjust: 100%;
+}
+body {
+    overflow-x: hidden;
+}
+.tree-toggle {
+    min-height: 48px;
+    touch-action: manipulation;
+}
+.tree-speaker {
+    min-height: 48px;
+}
+@media (max-width: 600px) {
+    header {
+        padding: 14px 10px;
+    }
+    header h1 {
+        font-size: 21px;
+    }
+    #eventName {
+        font-size: 13px;
+    }
+    .status-area {
+        margin: 10px auto;
+        padding: 0 8px;
+    }
+    .update-area {
+        padding: 10px 12px;
+        border-radius: 9px;
+    }
+    #lastUpdate {
+        font-size: 12px;
+        line-height: 1.4;
+    }
+    .update-area button {
+        padding: 9px 14px;
+        font-size: 14px;
+        flex-shrink: 0;
+    }
+    .tree-area {
+        padding: 4px 8px 12px;
+        border-radius: 9px;
+    }
+    .tree-date > .tree-toggle {
+        font-size: 19px;
+        padding: 13px 4px;
+    }
+    .tree-room > .tree-toggle {
+        font-size: 17px;
+        padding: 12px 4px 12px 18px;
+    }
+    .tree-session > .tree-toggle {
+        font-size: 15px;
+        padding: 11px 4px 11px 32px;
+    }
+    .tree-arrow {
+        width: 18px;
+        margin-right: 3px;
+    }
+    .tree-speaker {
+        padding: 10px 4px 10px 44px;
+        gap: 5px;
+    }
+    .tree-speaker .number {
+        width: 42px;
+        font-size: 13px;
+        flex-shrink: 0;
+    }
+    .tree-speaker .name {
+        min-width: 0;
+        font-size: 15px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+    .tree-speaker .received,
+    .tree-speaker .preregistered,
+    .tree-speaker .pending,
+    .tree-speaker .finished {
+        font-size: 12px;
+        flex-shrink: 0;
+        margin-left: 4px;
+    }
+    .tree-empty {
+        padding: 11px 5px 11px 44px;
+        font-size: 13px;
+    }
+    footer {
+        padding: 14px 8px;
+    }
+}
+@media (max-width: 380px) {
+    .tree-speaker {
+        padding-left: 34px;
+    }
+    .tree-speaker .number {
+        width: 36px;
+    }
+    .tree-speaker .name {
+        font-size: 14px;
+    }
+    .tree-speaker .received,
+    .tree-speaker .preregistered,
+    .tree-speaker .pending,
+    .tree-speaker .finished {
+        font-size: 11px;
+    }
+}
+
 </style>
 </head>
 
@@ -326,7 +437,7 @@ footer {
     </div>
 
     <div style="font-size:13px;color:#666;margin:0 2px 12px;">
-        日付の▶を押すと会場、会場の▶を押すとセッション、セッションの▶を押すと演者を表示します。
+        ▶をタップすると、日付 → 会場 → セッション → 演者の順に開きます。
         <br>● 緑：受付済み　● 黄：事前登録　○：未受付
     </div>
 
