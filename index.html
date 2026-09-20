@@ -224,6 +224,60 @@ footer {
     font-weight: bold;
     margin: 18px 2px 10px;
 }
+
+.tree-area {
+    background: #fff;
+    border-radius: 12px;
+    padding: 10px 18px 18px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.tree-node { border-top: 1px solid #eee; }
+.tree-node:first-child { border-top: 0; }
+.tree-toggle {
+    width: 100%;
+    background: transparent;
+    color: #222;
+    border: 0;
+    border-radius: 0;
+    text-align: left;
+    padding: 14px 8px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.tree-toggle:hover { background: #f7f8f9; }
+.tree-date > .tree-toggle { font-size: 22px; }
+.tree-room > .tree-toggle { font-size: 19px; padding-left: 28px; }
+.tree-session > .tree-toggle { font-size: 17px; padding-left: 50px; }
+.tree-arrow {
+    display: inline-block;
+    width: 22px;
+    margin-right: 5px;
+    transition: transform .15s ease;
+}
+.tree-open > .tree-toggle .tree-arrow { transform: rotate(90deg); }
+.tree-children { display: none; }
+.tree-open > .tree-children { display: block; }
+.tree-speaker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 10px 11px 78px;
+    border-top: 1px solid #f2f2f2;
+}
+.tree-speaker .number { width: 65px; }
+.tree-speaker .name { flex: 1; }
+.tree-empty {
+    padding: 12px 10px 12px 78px;
+    color: #888;
+    border-top: 1px solid #f2f2f2;
+}
+@media (max-width: 600px) {
+    .tree-room > .tree-toggle { padding-left: 18px; }
+    .tree-session > .tree-toggle { padding-left: 34px; }
+    .tree-speaker { padding-left: 48px; }
+    .tree-empty { padding-left: 48px; }
+}
+
 @media (max-width: 600px) {
     .filter-grid { grid-template-columns: 1fr; }
 }
@@ -271,24 +325,13 @@ footer {
         <button onclick="loadReception()">更新</button>
     </div>
 
-    <div class="filter-area">
-        <div class="filter-title">日付・会場を選択</div>
-        <div class="filter-grid">
-            <div><label>日付</label><select id="dateFilter"></select></div>
-            <div><label>会場</label><select id="roomFilter"></select></div>
-            <div id="sessionFilterWrap" style="display:none"><label>セッション</label><select id="sessionFilter"></select></div>
-        </div>
-        <div class="path">日付を選ぶと、その日付にある会場だけが会場プルダウンに表示されます。</div>
-    </div>
-
     <div style="font-size:13px;color:#666;margin:0 2px 12px;">
-        ● 緑：受付済み　● 黄：事前登録　○：未受付
+        日付の▶を押すと会場、会場の▶を押すとセッション、セッションの▶を押すと演者を表示します。
+        <br>● 緑：受付済み　● 黄：事前登録　○：未受付
     </div>
 
-    <div id="content">
-        <div class="loading">
-            受付状況を読み込んでいます...
-        </div>
+    <div id="content" class="tree-area">
+        <div class="loading">受付状況を読み込んでいます...</div>
     </div>
 
 </main>
@@ -364,105 +407,124 @@ function naturalCompare(a, b) {
 ========================================== */
 
 let receptionData = [];
+let hierarchyData = [];
 
-function uniqSorted(values) {
-    return [...new Set(values.filter(v => v !== null && v !== undefined && String(v).trim() !== ""))]
-        .sort(naturalCompare);
+function statusInfo(row) {
+    if (row && (row.status === "received" || row.received === true))
+        return {cls:"received", text:"受付済み"};
+    if (row && row.status === "preregistered")
+        return {cls:"preregistered", text:"事前登録"};
+    if (row && (row.status === "finished" || row.finished === true))
+        return {cls:"finished", text:"終了"};
+    return {cls:"pending", text:"未受付"};
 }
 
-function setOptions(select, values, allLabel, keepValue) {
-    const old = keepValue ?? select.value;
-    select.innerHTML = '<option value="">' + escapeHtml(allLabel) + '</option>' +
-        values.map(v => '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>').join("");
-    if ([...select.options].some(o => o.value === old)) select.value = old;
+function nodeKey(parts) {
+    return parts.map(x => String(x || "")).join("|||");
 }
 
-function refreshFilters() {
-    const dateSel = document.getElementById("dateFilter");
-    const roomSel = document.getElementById("roomFilter");
-    const sessionSel = document.getElementById("sessionFilter");
-
-    setOptions(dateSel, uniqSorted(receptionData.map(x => x.date)), "すべての日付");
-
-    const byDate = receptionData.filter(x => !dateSel.value || String(x.date || "") === dateSel.value);
-    setOptions(roomSel, uniqSorted(byDate.map(x => x.room)), "すべての会場");
-
-    const byRoom = byDate.filter(x => !roomSel.value || String(x.room || "") === roomSel.value);
-    setOptions(sessionSel, uniqSorted(byRoom.map(x => x.session)), "すべてのセッション");
-}
-
-function renderReception() {
+function renderTree() {
     const content = document.getElementById("content");
-    const dateValue = document.getElementById("dateFilter").value;
-    const roomValue = document.getElementById("roomFilter").value;
-    const sessionValue = document.getElementById("sessionFilter").value;
 
-    const data = receptionData.filter(row =>
-        (!dateValue || String(row.date || "") === dateValue) &&
-        (!roomValue || String(row.room || "") === roomValue) &&
-        (!sessionValue || String(row.session || "") === sessionValue)
-    );
+    const dates = {};
+    hierarchyData.forEach(h => {
+        const d = h.date || "";
+        if (!d) return;
+        if (!dates[d]) dates[d] = {};
+        const r = h.room || "";
+        if (r && !dates[d][r]) dates[d][r] = new Set();
+        if (r && h.session) dates[d][r].add(h.session);
+    });
 
-    if (!data.length) {
-        content.innerHTML = '<div class="empty">該当する演者はいません。</div>';
+    // Speaker data can fill gaps if hierarchy table has not caught up yet.
+    receptionData.forEach(row => {
+        const d = row.date || "";
+        const r = row.room || "";
+        const s = row.session || "";
+        if (!d) return;
+        if (!dates[d]) dates[d] = {};
+        if (r && !dates[d][r]) dates[d][r] = new Set();
+        if (r && s) dates[d][r].add(s);
+    });
+
+    const dateNames = Object.keys(dates).sort(naturalCompare);
+    if (!dateNames.length) {
+        content.innerHTML = '<div class="empty">現在、登録されている階層はありません。</div>';
         return;
     }
 
-    const dates = {};
-    data.forEach(row => {
-        const date = row.date || "日付未設定";
-        const room = row.room || "会場未設定";
-        const session = row.session || "";
-        if (!dates[date]) dates[date] = {};
-        if (!dates[date][room]) dates[date][room] = {};
-        if (!dates[date][room][session]) dates[date][room][session] = [];
-        dates[date][room][session].push(row);
-    });
-
     let html = "";
-    Object.keys(dates).sort(naturalCompare).forEach(date => {
-        html += '<div class="date-title">' + escapeHtml(date) + '</div>';
 
-        Object.keys(dates[date]).sort(naturalCompare).forEach(room => {
-            html += '<section class="room">';
-            html += '<div class="room-title">' + escapeHtml(room) + '</div>';
+    dateNames.forEach(date => {
+        const dateKey = nodeKey([date]);
+        html += '<div class="tree-node tree-date" data-key="' + escapeHtml(dateKey) + '">';
+        html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(date) + '</button>';
+        html += '<div class="tree-children">';
 
-            Object.keys(dates[date][room]).sort(naturalCompare).forEach(session => {
-                const speakers = dates[date][room][session];
-                speakers.sort((a,b) => naturalCompare(a.number,b.number));
+        const rooms = Object.keys(dates[date]).sort(naturalCompare);
+        rooms.forEach(room => {
+            const roomKey = nodeKey([date,room]);
+            html += '<div class="tree-node tree-room" data-key="' + escapeHtml(roomKey) + '">';
+            html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(room) + '</button>';
+            html += '<div class="tree-children">';
 
-                html += '<div class="session">';
-                if (session) {
-                    html += '<div class="session-title">' + escapeHtml(session) + '</div>';
+            let sessions = [...dates[date][room]].sort(naturalCompare);
+            const directSpeakers = receptionData.filter(x =>
+                String(x.date||"") === date &&
+                String(x.room||"") === room &&
+                !String(x.session||"")
+            );
+
+            // Speakers directly under room are shown in a virtual "演者" section.
+            if (directSpeakers.length) sessions = ["", ...sessions];
+
+            if (!sessions.length) {
+                html += '<div class="tree-empty">セッションはまだ登録されていません。</div>';
+            }
+
+            sessions.forEach(session => {
+                const label = session || "演者";
+                const sessionKey = nodeKey([date,room,session]);
+                html += '<div class="tree-node tree-session" data-key="' + escapeHtml(sessionKey) + '">';
+                html += '<button class="tree-toggle" type="button"><span class="tree-arrow">▶</span>' + escapeHtml(label) + '</button>';
+                html += '<div class="tree-children">';
+
+                const speakers = receptionData.filter(x =>
+                    String(x.date||"") === date &&
+                    String(x.room||"") === room &&
+                    String(x.session||"") === session
+                ).sort((a,b) => naturalCompare(a.number,b.number));
+
+                if (!speakers.length) {
+                    html += '<div class="tree-empty">演者はまだ登録されていません。</div>';
+                } else {
+                    speakers.forEach(row => {
+                        const st = statusInfo(row);
+                        html += '<div class="tree-speaker">' +
+                            '<div class="number">' + escapeHtml(row.number) + '</div>' +
+                            '<div class="name">' + escapeHtml(row.speaker) + '</div>' +
+                            '<div class="' + st.cls + '">' + st.text + '</div>' +
+                            '</div>';
+                    });
                 }
 
-                speakers.forEach(row => {
-                    let statusClass = "pending";
-                    let statusText = "未受付";
-
-                    if (row.status === "received" || row.received === true) {
-                        statusClass = "received";
-                        statusText = "受付済み";
-                    } else if (row.status === "preregistered") {
-                        statusClass = "preregistered";
-                        statusText = "事前登録";
-                    } else if (row.status === "finished" || row.finished === true) {
-                        statusClass = "finished";
-                        statusText = "終了";
-                    }
-
-                    html += '<div class="speaker">' +
-                        '<div class="number">' + escapeHtml(row.number) + '</div>' +
-                        '<div class="name">' + escapeHtml(row.speaker) + '</div>' +
-                        '<div class="' + statusClass + '">' + statusText + '</div>' +
-                        '</div>';
-                });
-                html += '</div>';
+                html += '</div></div>';
             });
-            html += '</section>';
+
+            html += '</div></div>';
+        });
+
+        if (!rooms.length) html += '<div class="tree-empty">会場はまだ登録されていません。</div>';
+        html += '</div></div>';
+    });
+
+    content.innerHTML = html;
+
+    content.querySelectorAll(".tree-toggle").forEach(btn => {
+        btn.addEventListener("click", () => {
+            btn.parentElement.classList.toggle("tree-open");
         });
     });
-    content.innerHTML = html;
 }
 
 async function loadReception() {
@@ -473,29 +535,26 @@ async function loadReception() {
 
     try {
         const eventFilter = encodeURIComponent(EVENT_ID);
-        const url = SUPABASE_URL + "/rest/v1/reception_status?select=*" +
+        const statusUrl = SUPABASE_URL + "/rest/v1/reception_status?select=*" +
+            "&event_id=eq." + eventFilter;
+        const hierarchyUrl = SUPABASE_URL + "/rest/v1/reception_hierarchy?select=*" +
             "&event_id=eq." + eventFilter;
 
-        const response = await fetch(url, {
-            headers: {"apikey": SUPABASE_KEY},
-            cache: "no-store"
-        });
+        const [statusResponse, hierarchyResponse] = await Promise.all([
+            fetch(statusUrl, {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"}),
+            fetch(hierarchyUrl, {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"})
+        ]);
 
-        if (!response.ok) throw new Error(response.status + " " + await response.text());
+        if (!statusResponse.ok) throw new Error(statusResponse.status + " " + await statusResponse.text());
+        if (!hierarchyResponse.ok) throw new Error(hierarchyResponse.status + " " + await hierarchyResponse.text());
 
-        receptionData = await response.json();
+        receptionData = await statusResponse.json();
+        hierarchyData = await hierarchyResponse.json();
 
-        if (!receptionData.length) {
-            content.innerHTML = '<div class="empty">現在、登録されている演者はいません。</div>';
-            lastUpdate.textContent = "最終確認 " + new Date().toLocaleTimeString("ja-JP");
-            refreshFilters();
-            return;
-        }
+        renderTree();
 
-        refreshFilters();
-        renderReception();
-
-        const latest = receptionData.map(x => x.updated_at).filter(Boolean).sort().pop();
+        const latest = [...receptionData, ...hierarchyData]
+            .map(x => x.updated_at).filter(Boolean).sort().pop();
         lastUpdate.textContent = latest
             ? "データ更新 " + new Date(latest).toLocaleString("ja-JP")
             : "最終確認 " + new Date().toLocaleTimeString("ja-JP");
@@ -505,19 +564,6 @@ async function loadReception() {
         lastUpdate.textContent = "通信エラー";
     }
 }
-
-document.getElementById("dateFilter").addEventListener("change", () => {
-    const room = document.getElementById("roomFilter");
-    const session = document.getElementById("sessionFilter");
-    room.value = ""; session.value = "";
-    refreshFilters(); renderReception();
-});
-document.getElementById("roomFilter").addEventListener("change", () => {
-    document.getElementById("sessionFilter").value = "";
-    refreshFilters();
-    renderReception();
-});
-document.getElementById("sessionFilter").addEventListener("change", renderReception);
 
 
 /* ==========================================
