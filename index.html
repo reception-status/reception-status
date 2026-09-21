@@ -420,31 +420,6 @@ body {
 }
 
 
-.event-select-area {
-    background:#fff;
-    border-radius:10px;
-    padding:12px 16px;
-    margin-bottom:12px;
-}
-.event-select-area label {
-    display:block;
-    font-size:13px;
-    color:#666;
-    margin-bottom:5px;
-}
-.event-select-area select {
-    width:100%;
-    padding:10px;
-    border:1px solid #ccc;
-    border-radius:7px;
-    background:#fff;
-    font-size:16px;
-}
-.retry-button {
-    margin-top:12px;
-}
-@media (max-width:600px) {
-    .event-select-area { padding:10px 12px; }
     .event-select-area select { min-height:44px; }
 }
 </style>
@@ -454,17 +429,10 @@ body {
 
 <header>
     <h1>受付状況</h1>
-    <div id="eventName">学会を選択してください</div>
+    <div id="eventName">受付状況を確認しています...</div>
 </header>
 
 <main class="status-area">
-
-    <div class="event-select-area">
-        <label for="eventSelect">学会を選択</label>
-        <select id="eventSelect">
-            <option value="">読み込み中...</option>
-        </select>
-    </div>
 
     <div class="update-area">
         <div id="lastUpdate">読み込み中...</div>
@@ -511,6 +479,12 @@ const params =
 
 let EVENT_ID = params.get("event") || "";
 
+// 専用URL方式：URLに含まれるイベントID以外は取得しない。
+// 不正な文字を含むIDは無効として扱う。
+if (EVENT_ID && !/^[A-Za-z0-9_-]{8,80}$/.test(EVENT_ID)) {
+    EVENT_ID = "";
+}
+
 
 /* ==========================================
    HTMLエスケープ
@@ -553,7 +527,6 @@ function naturalCompare(a, b) {
 
 let receptionData = [];
 let hierarchyData = [];
-const eventSelect = document.getElementById("eventSelect");
 
 function statusInfo(row) {
     if (row && (row.status === "received" || row.received === true))
@@ -738,58 +711,17 @@ function renderTree() {
     content.replaceChildren(fragment);
 }
 
-async function loadEventList() {
-    eventSelect.innerHTML = '<option value="">学会を選択してください</option>';
-
-    const urls = [
-        SUPABASE_URL + "/rest/v1/reception_hierarchy?select=event_id",
-        SUPABASE_URL + "/rest/v1/reception_status?select=event_id"
-    ];
-
-    const results = await Promise.all(urls.map(url =>
-        fetchWithTimeout(url, {
-            headers: {"apikey": SUPABASE_KEY},
-            cache: "no-store"
-        })
-    ));
-
-    for (const response of results) {
-        if (!response.ok) throw new Error(response.status + " " + await response.text());
-    }
-
-    const all = [
-        ...await results[0].json(),
-        ...await results[1].json()
-    ];
-
-    const events = [...new Set(all.map(x => x.event_id).filter(Boolean))].sort(naturalCompare);
-
-    events.forEach(eventId => {
-        const option = document.createElement("option");
-        option.value = eventId;
-        option.textContent = eventId;
-        eventSelect.appendChild(option);
-    });
-
-    if (EVENT_ID && events.includes(EVENT_ID)) {
-        eventSelect.value = EVENT_ID;
-    } else if (events.length === 1) {
-        EVENT_ID = events[0];
-        eventSelect.value = EVENT_ID;
-    }
-}
-
 async function loadReception() {
     if (!EVENT_ID) {
-        document.getElementById("eventName").textContent = "学会を選択してください";
+        document.getElementById("eventName").textContent = "イベントが指定されていません";
         document.getElementById("content").innerHTML =
-            '<div class="empty">上の「学会を選択」から受付状況を表示する学会を選んでください。</div>';
-        document.getElementById("lastUpdate").textContent = "学会未選択";
+            '<div class="empty">受付状況ページの専用URLを確認してください。<br><br>このページから他のイベントを検索・選択することはできません。</div>';
+        document.getElementById("lastUpdate").textContent = "専用URLが必要です";
         return;
     }
 
     const lastUpdate = document.getElementById("lastUpdate");
-    document.getElementById("eventName").textContent = EVENT_ID;
+    document.getElementById("eventName").textContent = "専用イベント";
     lastUpdate.textContent = "更新しています...";
 
     const eventFilter = encodeURIComponent(EVENT_ID);
@@ -817,25 +749,12 @@ async function loadReception() {
 
 async function initializePage() {
     try {
-        await loadEventList();
         await loadReception();
     } catch(error) {
         console.error(error);
         showError("受付情報を取得できません。通信環境を確認して再読み込みしてください。");
     }
 }
-
-eventSelect.addEventListener("change", async () => {
-    EVENT_ID = eventSelect.value;
-    receptionData = [];
-    hierarchyData = [];
-    try {
-        await loadReception();
-    } catch(error) {
-        console.error(error);
-        showError("選択した学会の受付情報を取得できません。");
-    }
-});
 
 
 /* ==========================================
