@@ -451,7 +451,7 @@ body {
 </main>
 
 <footer>
-    Reception Status System
+    Reception Status System <span style="opacity:.45">HTML V34</span>
 </footer>
 
 <script>
@@ -686,40 +686,66 @@ function renderTree() {
                         String(x.room||"") === room &&
                         String(x.session||"") === session
                     ).sort((a,b) => {
-                        // V33: 演台番号を数字の自然順で表示する。
-                        // number列が空の場合は speaker の先頭（例: SY1-6_氏名）から番号を取得。
-                        // 「座長」など演台番号を持たない行は演者の後ろへ配置する。
-                        const sortKey = row => {
-                            const number = String(row.number || "").trim();
-                            const speaker = String(row.speaker || "").trim();
-                            const source = number || speaker;
-                            const m = source.match(/^([A-Za-z]+\d*)[-_－ー]?\s*(\d+)/);
+                        // V34: 表示値全体から演台番号を抽出して強制的に数値順にする。
+                        // 例: SY1-1, SY1_1, SY1－1, SY1-10
+                        // 番号を持たない「座長」等は最後。
+                        const key = row => {
+                            const fields = [
+                                row.number,
+                                row.speaker,
+                                row.name,
+                                row.presenter,
+                                row.presentation_number
+                            ].filter(v => v !== null && v !== undefined && String(v).trim() !== "");
+
+                            const text = fields.map(v => String(v).trim()).join(" ");
+
+                            // 英字＋数字＋区切り＋演題番号
+                            // SY1-6 / SY1_6 / SY1－6 / SY1 6 に対応
+                            let m = text.match(/([A-Za-z]+)\s*(\d+)\s*[-_－ー]\s*(\d+)/i);
                             if (m) {
                                 return {
-                                    hasNumber: true,
-                                    prefix: m[1],
-                                    num: Number(m[2]),
-                                    raw: source
+                                    numbered: true,
+                                    family: m[1].toUpperCase(),
+                                    group: Number(m[2]),
+                                    order: Number(m[3]),
+                                    raw: text
                                 };
                             }
+
+                            // 「1_氏名」「01-氏名」のような単純番号にも対応
+                            m = text.match(/^\s*(\d+)\s*[-_－ー]/);
+                            if (m) {
+                                return {
+                                    numbered: true,
+                                    family: "",
+                                    group: 0,
+                                    order: Number(m[1]),
+                                    raw: text
+                                };
+                            }
+
                             return {
-                                hasNumber: false,
-                                prefix: "",
-                                num: Number.MAX_SAFE_INTEGER,
-                                raw: source
+                                numbered: false,
+                                family: "",
+                                group: Number.MAX_SAFE_INTEGER,
+                                order: Number.MAX_SAFE_INTEGER,
+                                raw: text
                             };
                         };
 
-                        const ka = sortKey(a);
-                        const kb = sortKey(b);
+                        const ka = key(a);
+                        const kb = key(b);
 
-                        if (ka.hasNumber !== kb.hasNumber)
-                            return ka.hasNumber ? -1 : 1;
+                        if (ka.numbered !== kb.numbered)
+                            return ka.numbered ? -1 : 1;
 
-                        const prefixCmp = naturalCompare(ka.prefix, kb.prefix);
-                        if (prefixCmp !== 0) return prefixCmp;
-
-                        if (ka.num !== kb.num) return ka.num - kb.num;
+                        if (ka.numbered && kb.numbered) {
+                            const familyCmp = naturalCompare(ka.family, kb.family);
+                            if (familyCmp !== 0) return familyCmp;
+                            if (ka.group !== kb.group) return ka.group - kb.group;
+                            if (ka.order !== kb.order) return ka.order - kb.order;
+                        }
 
                         return naturalCompare(ka.raw, kb.raw);
                     });
