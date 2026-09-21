@@ -685,7 +685,44 @@ function renderTree() {
                         String(x.date||"") === date &&
                         String(x.room||"") === room &&
                         String(x.session||"") === session
-                    ).sort((a,b) => naturalCompare(a.number,b.number));
+                    ).sort((a,b) => {
+                        // V33: 演台番号を数字の自然順で表示する。
+                        // number列が空の場合は speaker の先頭（例: SY1-6_氏名）から番号を取得。
+                        // 「座長」など演台番号を持たない行は演者の後ろへ配置する。
+                        const sortKey = row => {
+                            const number = String(row.number || "").trim();
+                            const speaker = String(row.speaker || "").trim();
+                            const source = number || speaker;
+                            const m = source.match(/^([A-Za-z]+\d*)[-_－ー]?\s*(\d+)/);
+                            if (m) {
+                                return {
+                                    hasNumber: true,
+                                    prefix: m[1],
+                                    num: Number(m[2]),
+                                    raw: source
+                                };
+                            }
+                            return {
+                                hasNumber: false,
+                                prefix: "",
+                                num: Number.MAX_SAFE_INTEGER,
+                                raw: source
+                            };
+                        };
+
+                        const ka = sortKey(a);
+                        const kb = sortKey(b);
+
+                        if (ka.hasNumber !== kb.hasNumber)
+                            return ka.hasNumber ? -1 : 1;
+
+                        const prefixCmp = naturalCompare(ka.prefix, kb.prefix);
+                        if (prefixCmp !== 0) return prefixCmp;
+
+                        if (ka.num !== kb.num) return ka.num - kb.num;
+
+                        return naturalCompare(ka.raw, kb.raw);
+                    });
 
                     const speakerFrag = document.createDocumentFragment();
                     if (!speakers.length) speakerFrag.appendChild(emptyElement("演者はまだ登録されていません。"));
