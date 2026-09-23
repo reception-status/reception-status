@@ -420,21 +420,18 @@ body {
 }
 
 
-/* ===== V41.2 top tab filters ===== */
-.top-filter-area { background:#fff; border-radius:10px; padding:12px 14px; margin-bottom:15px; box-shadow:0 1px 4px rgba(0,0,0,.05); }
-.filter-row { display:flex; align-items:flex-start; gap:8px; margin:7px 0; }
-.filter-label { width:72px; flex:0 0 72px; font-weight:700; padding-top:7px; }
-.filter-tabs { display:flex; gap:7px; flex-wrap:wrap; min-width:0; }
-.filter-tab { background:#eef1f4; color:#222; padding:7px 12px; border-radius:999px; font-size:14px; border:1px solid #d9dee3; }
-.filter-tab.active { background:#222; color:#fff; border-color:#222; }
-.filter-tab:disabled { opacity:.45; cursor:default; }
-.filter-summary { margin-top:8px; font-size:12px; color:#666; }
+/* ===== V41.3 top dropdown filters ===== */
+.top-filter-area { background:#fff; border-radius:10px; padding:14px 16px; margin-bottom:15px; box-shadow:0 1px 4px rgba(0,0,0,.05); }
+.filter-select-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.filter-select-group label { display:block; font-size:13px; font-weight:700; margin-bottom:5px; }
+.filter-select-group select { width:100%; min-height:42px; padding:8px 34px 8px 10px; border:1px solid #cfd5db; border-radius:8px; background:#fff; color:#222; font-size:15px; }
+.filter-select-group select:focus { outline:2px solid #999; outline-offset:1px; }
+.filter-select-group select:disabled { background:#f3f4f5; color:#999; }
+.filter-summary { margin-top:10px; font-size:12px; color:#666; }
 @media (max-width:600px) {
-  .top-filter-area { padding:10px; }
-  .filter-row { display:block; }
-  .filter-label { width:auto; padding:0 0 5px; font-size:13px; }
-  .filter-tabs { flex-wrap:nowrap; overflow-x:auto; padding-bottom:3px; -webkit-overflow-scrolling:touch; }
-  .filter-tab { flex:0 0 auto; font-size:13px; padding:7px 11px; }
+  .top-filter-area { padding:11px; }
+  .filter-select-grid { grid-template-columns:1fr; gap:9px; }
+  .filter-select-group select { min-height:44px; font-size:16px; }
 }
 
 </style>
@@ -455,9 +452,20 @@ body {
     </div>
 
     <div id="topFilters" class="top-filter-area">
-        <div class="filter-row"><div class="filter-label">日付</div><div id="dateTabs" class="filter-tabs"></div></div>
-        <div class="filter-row"><div class="filter-label">会場</div><div id="roomTabs" class="filter-tabs"></div></div>
-        <div class="filter-row"><div class="filter-label">セッション</div><div id="sessionTabs" class="filter-tabs"></div></div>
+        <div class="filter-select-grid">
+            <div class="filter-select-group">
+                <label for="dateFilter">日付</label>
+                <select id="dateFilter"><option value="">すべての日付</option></select>
+            </div>
+            <div class="filter-select-group">
+                <label for="roomFilter">会場</label>
+                <select id="roomFilter"><option value="">すべての会場</option></select>
+            </div>
+            <div class="filter-select-group">
+                <label for="sessionFilter">セッション</label>
+                <select id="sessionFilter"><option value="">すべてのセッション</option></select>
+            </div>
+        </div>
         <div id="filterSummary" class="filter-summary">すべて表示</div>
     </div>
 
@@ -664,13 +672,20 @@ function uniqueSorted(values) {
     return [...new Set(values.map(v => String(v || "")).filter(Boolean))].sort(naturalCompare);
 }
 
-function makeFilterTab(label, value, selected, onClick) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "filter-tab" + (selected === value ? " active" : "");
-    btn.textContent = label;
-    btn.addEventListener("click", onClick);
-    return btn;
+function fillSelect(select, values, selected, allLabel) {
+    const frag = document.createDocumentFragment();
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = allLabel;
+    frag.appendChild(all);
+    values.forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v;
+        frag.appendChild(opt);
+    });
+    select.replaceChildren(frag);
+    select.value = selected;
 }
 
 function allSourceRows() {
@@ -690,37 +705,43 @@ function renderFilters() {
     const sessions = uniqueSorted(roomRows.map(x => x.session));
     if (selectedSession && !sessions.includes(selectedSession)) selectedSession = "";
 
-    const dateTabs = document.getElementById("dateTabs");
-    const roomTabs = document.getElementById("roomTabs");
-    const sessionTabs = document.getElementById("sessionTabs");
-    dateTabs.replaceChildren(); roomTabs.replaceChildren(); sessionTabs.replaceChildren();
+    const dateSelect = document.getElementById("dateFilter");
+    const roomSelect = document.getElementById("roomFilter");
+    const sessionSelect = document.getElementById("sessionFilter");
 
-    dateTabs.appendChild(makeFilterTab("すべて", "", selectedDate, () => {
-        selectedDate=""; selectedRoom=""; selectedSession=""; renderFilters(); renderTree();
-    }));
-    dates.forEach(v => dateTabs.appendChild(makeFilterTab(v, v, selectedDate, () => {
-        selectedDate=v; selectedRoom=""; selectedSession=""; renderFilters(); renderTree();
-    })));
+    fillSelect(dateSelect, dates, selectedDate, "すべての日付");
+    fillSelect(roomSelect, rooms, selectedRoom, "すべての会場");
+    fillSelect(sessionSelect, sessions, selectedSession, "すべてのセッション");
 
-    roomTabs.appendChild(makeFilterTab("すべて", "", selectedRoom, () => {
-        selectedRoom=""; selectedSession=""; renderFilters(); renderTree();
-    }));
-    rooms.forEach(v => roomTabs.appendChild(makeFilterTab(v, v, selectedRoom, () => {
-        selectedRoom=v; selectedSession=""; renderFilters(); renderTree();
-    })));
-
-    sessionTabs.appendChild(makeFilterTab("すべて", "", selectedSession, () => {
-        selectedSession=""; renderFilters(); renderTree();
-    }));
-    sessions.forEach(v => sessionTabs.appendChild(makeFilterTab(v, v, selectedSession, () => {
-        selectedSession=v; renderFilters(); renderTree();
-    })));
+    roomSelect.disabled = rooms.length === 0;
+    sessionSelect.disabled = sessions.length === 0;
 
     const parts=[];
     if (selectedDate) parts.push(selectedDate);
     if (selectedRoom) parts.push(selectedRoom);
     if (selectedSession) parts.push(selectedSession);
     document.getElementById("filterSummary").textContent = parts.length ? "表示中：" + parts.join(" ＞ ") : "すべて表示";
+}
+
+function bindFilterSelects() {
+    document.getElementById("dateFilter").addEventListener("change", e => {
+        selectedDate = e.target.value;
+        selectedRoom = "";
+        selectedSession = "";
+        renderFilters();
+        renderTree();
+    });
+    document.getElementById("roomFilter").addEventListener("change", e => {
+        selectedRoom = e.target.value;
+        selectedSession = "";
+        renderFilters();
+        renderTree();
+    });
+    document.getElementById("sessionFilter").addEventListener("change", e => {
+        selectedSession = e.target.value;
+        renderFilters();
+        renderTree();
+    });
 }
 
 function filteredReceptionData() {
@@ -973,6 +994,7 @@ async function initializePage() {
    初回読み込み
 ========================================== */
 
+bindFilterSelects();
 initializePage();
 
 
