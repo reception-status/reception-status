@@ -420,8 +420,23 @@ body {
 }
 
 
-    .event-select-area select { min-height:44px; }
+/* ===== V41.2 top tab filters ===== */
+.top-filter-area { background:#fff; border-radius:10px; padding:12px 14px; margin-bottom:15px; box-shadow:0 1px 4px rgba(0,0,0,.05); }
+.filter-row { display:flex; align-items:flex-start; gap:8px; margin:7px 0; }
+.filter-label { width:72px; flex:0 0 72px; font-weight:700; padding-top:7px; }
+.filter-tabs { display:flex; gap:7px; flex-wrap:wrap; min-width:0; }
+.filter-tab { background:#eef1f4; color:#222; padding:7px 12px; border-radius:999px; font-size:14px; border:1px solid #d9dee3; }
+.filter-tab.active { background:#222; color:#fff; border-color:#222; }
+.filter-tab:disabled { opacity:.45; cursor:default; }
+.filter-summary { margin-top:8px; font-size:12px; color:#666; }
+@media (max-width:600px) {
+  .top-filter-area { padding:10px; }
+  .filter-row { display:block; }
+  .filter-label { width:auto; padding:0 0 5px; font-size:13px; }
+  .filter-tabs { flex-wrap:nowrap; overflow-x:auto; padding-bottom:3px; -webkit-overflow-scrolling:touch; }
+  .filter-tab { flex:0 0 auto; font-size:13px; padding:7px 11px; }
 }
+
 </style>
 </head>
 
@@ -439,6 +454,13 @@ body {
         <button onclick="loadReception()">更新</button>
     </div>
 
+    <div id="topFilters" class="top-filter-area">
+        <div class="filter-row"><div class="filter-label">日付</div><div id="dateTabs" class="filter-tabs"></div></div>
+        <div class="filter-row"><div class="filter-label">会場</div><div id="roomTabs" class="filter-tabs"></div></div>
+        <div class="filter-row"><div class="filter-label">セッション</div><div id="sessionTabs" class="filter-tabs"></div></div>
+        <div id="filterSummary" class="filter-summary">すべて表示</div>
+    </div>
+
     <div style="font-size:13px;color:#666;margin:0 2px 12px;">
         ▶をタップすると、日付 → 会場 → セッション → 演者の順に開きます。
         <br>● 緑：受付済み　● 黄：事前登録　○：未受付
@@ -451,7 +473,7 @@ body {
 </main>
 
 <footer>
-    Reception Status System <span style="opacity:.45">HTML V34</span>
+    Reception Status System <span style="opacity:.45">HTML V41.2 Filter Tabs</span>
 </footer>
 
 <script>
@@ -527,6 +549,7 @@ function naturalCompare(a, b) {
 
 let receptionData = [];
 let hierarchyData = [];
+let loadInProgress = false;
 
 function statusInfo(row) {
     if (row && (row.status === "received" || row.received === true))
@@ -548,6 +571,40 @@ function fetchWithTimeout(url, options={}, timeout=10000) {
     return fetch(url, {...options, signal: controller.signal})
         .finally(() => clearTimeout(timer));
 }
+
+async function fetchAllRows(baseUrl, pageSize=500) {
+    const all = [];
+    let offset = 0;
+
+    while (true) {
+        const separator = baseUrl.includes("?") ? "&" : "?";
+        const url = baseUrl +
+            separator + "limit=" + pageSize +
+            "&offset=" + offset;
+
+        const response = await fetchWithTimeout(
+            url,
+            {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"}
+        );
+
+        if (!response.ok)
+            throw new Error(response.status + " " + await response.text());
+
+        const page = await response.json();
+        all.push(...page);
+
+        if (page.length < pageSize) break;
+
+        offset += pageSize;
+
+        // 異常な無限取得を防止。通常1500人規模では到達しない。
+        if (offset > 50000)
+            throw new Error("受付データ件数が安全上限を超えました。");
+    }
+
+    return all;
+}
+
 
 function showError(message) {
     const content = document.getElementById("content");
@@ -599,9 +656,94 @@ function emptyElement(text) {
     return div;
 }
 
+let selectedDate = "";
+let selectedRoom = "";
+let selectedSession = "";
+
+function uniqueSorted(values) {
+    return [...new Set(values.map(v => String(v || "")).filter(Boolean))].sort(naturalCompare);
+}
+
+function makeFilterTab(label, value, selected, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "filter-tab" + (selected === value ? " active" : "");
+    btn.textContent = label;
+    btn.addEventListener("click", onClick);
+    return btn;
+}
+
+function allSourceRows() {
+    return [...hierarchyData, ...receptionData];
+}
+
+function renderFilters() {
+    const rows = allSourceRows();
+    const dates = uniqueSorted(rows.map(x => x.date));
+    if (selectedDate && !dates.includes(selectedDate)) selectedDate = "";
+
+    const dateRows = selectedDate ? rows.filter(x => String(x.date||"") === selectedDate) : rows;
+    const rooms = uniqueSorted(dateRows.map(x => x.room));
+    if (selectedRoom && !rooms.includes(selectedRoom)) selectedRoom = "";
+
+    const roomRows = dateRows.filter(x => !selectedRoom || String(x.room||"") === selectedRoom);
+    const sessions = uniqueSorted(roomRows.map(x => x.session));
+    if (selectedSession && !sessions.includes(selectedSession)) selectedSession = "";
+
+    const dateTabs = document.getElementById("dateTabs");
+    const roomTabs = document.getElementById("roomTabs");
+    const sessionTabs = document.getElementById("sessionTabs");
+    dateTabs.replaceChildren(); roomTabs.replaceChildren(); sessionTabs.replaceChildren();
+
+    dateTabs.appendChild(makeFilterTab("すべて", "", selectedDate, () => {
+        selectedDate=""; selectedRoom=""; selectedSession=""; renderFilters(); renderTree();
+    }));
+    dates.forEach(v => dateTabs.appendChild(makeFilterTab(v, v, selectedDate, () => {
+        selectedDate=v; selectedRoom=""; selectedSession=""; renderFilters(); renderTree();
+    })));
+
+    roomTabs.appendChild(makeFilterTab("すべて", "", selectedRoom, () => {
+        selectedRoom=""; selectedSession=""; renderFilters(); renderTree();
+    }));
+    rooms.forEach(v => roomTabs.appendChild(makeFilterTab(v, v, selectedRoom, () => {
+        selectedRoom=v; selectedSession=""; renderFilters(); renderTree();
+    })));
+
+    sessionTabs.appendChild(makeFilterTab("すべて", "", selectedSession, () => {
+        selectedSession=""; renderFilters(); renderTree();
+    }));
+    sessions.forEach(v => sessionTabs.appendChild(makeFilterTab(v, v, selectedSession, () => {
+        selectedSession=v; renderFilters(); renderTree();
+    })));
+
+    const parts=[];
+    if (selectedDate) parts.push(selectedDate);
+    if (selectedRoom) parts.push(selectedRoom);
+    if (selectedSession) parts.push(selectedSession);
+    document.getElementById("filterSummary").textContent = parts.length ? "表示中：" + parts.join(" ＞ ") : "すべて表示";
+}
+
+function filteredReceptionData() {
+    return receptionData.filter(row =>
+        (!selectedDate || String(row.date||"") === selectedDate) &&
+        (!selectedRoom || String(row.room||"") === selectedRoom) &&
+        (!selectedSession || String(row.session||"") === selectedSession)
+    );
+}
+
+function filteredHierarchyData() {
+    return hierarchyData.filter(row =>
+        (!selectedDate || String(row.date||"") === selectedDate) &&
+        (!selectedRoom || String(row.room||"") === selectedRoom) &&
+        (!selectedSession || String(row.session||"") === selectedSession)
+    );
+}
+
 function buildTreeModel() {
     const dates = {};
-    hierarchyData.forEach(item => {
+    const hierarchyRows = filteredHierarchyData();
+    const receptionRows = filteredReceptionData();
+    hierarchyRows.forEach(item => {
         const date = String(item.date || "");
         const room = String(item.room || "");
         const session = String(item.session || "");
@@ -610,7 +752,7 @@ function buildTreeModel() {
         if (room && !dates[date][room]) dates[date][room] = new Set();
         if (room && session) dates[date][room].add(session);
     });
-    receptionData.forEach(row => {
+    receptionRows.forEach(row => {
         const date = String(row.date || "");
         const room = String(row.room || "");
         const session = String(row.session || "");
@@ -624,6 +766,7 @@ function buildTreeModel() {
 
 function renderTree() {
     const content = document.getElementById("content");
+    const displayReception = filteredReceptionData();
     const dates = buildTreeModel();
     const dateNames = Object.keys(dates).sort(naturalCompare);
 
@@ -666,7 +809,7 @@ function renderTree() {
             const sessionFrag = document.createDocumentFragment();
 
             let sessions = [...dates[date][room]].sort(naturalCompare);
-            const directSpeakers = receptionData.filter(x =>
+            const directSpeakers = displayReception.filter(x =>
                 String(x.date||"") === date && String(x.room||"") === room && !String(x.session||"")
             );
             if (directSpeakers.length) sessions = ["", ...sessions];
@@ -681,7 +824,7 @@ function renderTree() {
                         session || "演者"
                     );
                     const sessionChildren = sessionNode.querySelector(":scope > .tree-children");
-                    const speakers = receptionData.filter(x =>
+                    const speakers = displayReception.filter(x =>
                         String(x.date||"") === date &&
                         String(x.room||"") === room &&
                         String(x.session||"") === session
@@ -775,6 +918,8 @@ function renderTree() {
 }
 
 async function loadReception() {
+    if (loadInProgress) return;
+
     if (!EVENT_ID) {
         document.getElementById("eventName").textContent = "イベントが指定されていません";
         document.getElementById("content").innerHTML =
@@ -786,21 +931,22 @@ async function loadReception() {
     const lastUpdate = document.getElementById("lastUpdate");
     document.getElementById("eventName").textContent = "専用イベント";
     lastUpdate.textContent = "更新しています...";
+    loadInProgress = true;
 
+    try {
     const eventFilter = encodeURIComponent(EVENT_ID);
-    const statusUrl = SUPABASE_URL + "/rest/v1/reception_status?select=*" + "&event_id=eq." + eventFilter;
-    const hierarchyUrl = SUPABASE_URL + "/rest/v1/reception_hierarchy?select=*" + "&event_id=eq." + eventFilter;
+    const statusUrl = SUPABASE_URL +
+        "/rest/v1/reception_status?select=*&event_id=eq." + eventFilter +
+        "&order=date.asc,room.asc,session.asc,number.asc,speaker.asc";
+    const hierarchyUrl = SUPABASE_URL +
+        "/rest/v1/reception_hierarchy?select=*&event_id=eq." + eventFilter +
+        "&order=date.asc,room.asc,session.asc";
 
-    const [statusResponse, hierarchyResponse] = await Promise.all([
-        fetchWithTimeout(statusUrl, {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"}),
-        fetchWithTimeout(hierarchyUrl, {headers:{"apikey":SUPABASE_KEY}, cache:"no-store"})
+    [receptionData, hierarchyData] = await Promise.all([
+        fetchAllRows(statusUrl, 500),
+        fetchAllRows(hierarchyUrl, 500)
     ]);
-
-    if (!statusResponse.ok) throw new Error(statusResponse.status + " " + await statusResponse.text());
-    if (!hierarchyResponse.ok) throw new Error(hierarchyResponse.status + " " + await hierarchyResponse.text());
-
-    receptionData = await statusResponse.json();
-    hierarchyData = await hierarchyResponse.json();
+    renderFilters();
     renderTree();
 
     const latest = [...receptionData, ...hierarchyData]
@@ -808,6 +954,9 @@ async function loadReception() {
     lastUpdate.textContent = latest
         ? "データ更新 " + new Date(latest).toLocaleString("ja-JP")
         : "最終確認 " + new Date().toLocaleTimeString("ja-JP");
+    } finally {
+        loadInProgress = false;
+    }
 }
 
 async function initializePage() {
